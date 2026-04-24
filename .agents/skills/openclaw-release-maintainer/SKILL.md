@@ -29,9 +29,13 @@ Use this skill for release and publish-time workflow. Keep ordinary development 
   Treat the branch commit as the release base. If validation finds a concrete
   issue, inspect `main` and backport only the low-risk fix commits that directly
   address that failure.
-- Do not delete or rewrite beta tags after they leave the machine. If a
-  published or pushed beta needs a fix, commit the fix on the release branch and
-  increment to the next `-beta.N`.
+- Beta numbers are consumed by npm publication, not by a local tag or canceled
+  preflight. If a beta tag was pushed but the matching npm package was not
+  published, confirm `npm view openclaw@YYYY.M.D-beta.N` is missing and cancel
+  any in-flight preflight/publish workflows before moving or recreating that
+  beta tag. Once the npm package is published, do not delete or rewrite the
+  beta tag; commit the fix on the release branch and increment to the next
+  `-beta.N`.
 - For a beta release train, run the full pre-npm test roster before publishing
   each beta. After a beta is published, run the smaller published-install roster
   focused on install/update plus all Docker and Parallels release checks. If
@@ -39,7 +43,7 @@ Use this skill for release and publish-time workflow. Keep ordinary development 
   when the operator asked for the full beta-to-stable train. If anything fails,
   fix it on the release branch, commit/push/pull, increment beta number, and
   repeat. Operators may authorize up to 4 autonomous beta attempts; after 4
-  failed beta attempts, stop and report.
+  failed published beta attempts, stop and report.
 - Use `/changelog` before version/tag preparation so the top changelog section
   is deduped and ordered by user impact.
 - Do not create beta-specific `CHANGELOG.md` headings. Beta releases use the

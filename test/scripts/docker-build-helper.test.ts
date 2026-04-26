@@ -47,4 +47,12 @@ describe("docker build helper", () => {
     expect(scheduler).toContain("withResolvedPnpmCommand");
     expect(scheduler).toContain("OPENCLAW_DOCKER_ALL_PNPM_COMMAND");
   });
+
+  it("runs release installer E2E against the npm beta tag", () => {
+    const scheduler = readFileSync(DOCKER_ALL_SCHEDULER_PATH, "utf8");
+
+    expect(scheduler).toContain(
+      'npmLane("install-e2e", "OPENCLAW_INSTALL_TAG=beta OPENCLAW_E2E_MODELS=both pnpm test:install:e2e"',
+    );
+  });
 });

@@ -663,7 +663,18 @@ function buildLaneRerunCommand(name, baseEnv) {
     ["OPENCLAW_SKIP_DOCKER_BUILD", "1"],
     ["OPENCLAW_DOCKER_E2E_IMAGE", baseEnv.OPENCLAW_DOCKER_E2E_IMAGE || DEFAULT_E2E_IMAGE],
   ];
+  if (baseEnv.OPENCLAW_DOCKER_ALL_PNPM_COMMAND) {
+    env.push(["OPENCLAW_DOCKER_ALL_PNPM_COMMAND", baseEnv.OPENCLAW_DOCKER_ALL_PNPM_COMMAND]);
+  }
   return `${env.map(([key, value]) => `${key}=${shellQuote(value)}`).join(" ")} pnpm test:docker:all`;
+}
+
+function withResolvedPnpmCommand(command, env) {
+  const pnpmCommand = env.OPENCLAW_DOCKER_ALL_PNPM_COMMAND?.trim();
+  if (!pnpmCommand) {
+    return command;
+  }
+  return command.replace(/(^|\s)pnpm(?=\s)/g, `$1${shellQuote(pnpmCommand)}`);
 }
 
 function timingSeconds(timingStore, poolLane) {
@@ -1003,10 +1014,11 @@ function laneEnv(name, baseEnv, logDir, cacheKey) {
 }
 
 async function runLane(lane, baseEnv, logDir, fallbackTimeoutMs) {
-  const { command, name } = lane;
+  const { name } = lane;
   const timeoutMs = lane.timeoutMs ?? fallbackTimeoutMs;
   const logFile = path.join(logDir, `${name}.log`);
   const env = laneEnv(name, baseEnv, logDir, lane.cacheKey);
+  const command = withResolvedPnpmCommand(lane.command, env);
   await mkdir(env.OPENCLAW_DOCKER_CLI_TOOLS_DIR, { recursive: true });
   await mkdir(env.OPENCLAW_DOCKER_CACHE_HOME_DIR, { recursive: true });
   await fs.promises.writeFile(

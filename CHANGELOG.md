@@ -50,6 +50,7 @@ Docs: https://docs.openclaw.ai
 - Providers/plugins: keep onboarding and auth-choice setup lists on cold manifest/install metadata and add Provider Index install metadata for not-yet-installed provider plugins. Thanks @vincentkoc.
 - Providers/plugins: keep provider setup guidance and configure auth imports on cold manifest metadata, with a regression guard against static provider-runtime imports on setup/configure list paths. Thanks @vincentkoc.
 - CLI/capabilities: keep capability command registration from importing the models auth runtime until `model auth login` actually runs. Thanks @vincentkoc.
+- CLI/configure: keep web-search configure prompts on cold plugin registry metadata until the user chooses managed search setup. Thanks @vincentkoc.
 - Plugins/chat commands: refresh the persisted plugin registry after `/plugins enable` and `/plugins disable`, matching the CLI mutation path. Thanks @vincentkoc.
 - Plugins/compat: mark `OPENCLAW_DISABLE_PERSISTED_PLUGIN_REGISTRY` as a deprecated break-glass switch and point operators at registry repair instead. Thanks @vincentkoc.
 - Plugins/registry: ignore stale persisted registry reads when plugin policy no longer matches current config, and stamp generated registry files with a do-not-edit warning. Thanks @vincentkoc.
@@ -88,7 +89,12 @@ Docs: https://docs.openclaw.ai
 
 ### Fixes
 
+- Agents/subagents: deliver completed yielded-subagent results back to no-thread requester routes via direct fallback when the dormant parent announce turn produces no visible reply, and add QA-lab coverage for the regression. Thanks @vincentkoc.
+- Gateway/Tailscale: let Tailscale-authenticated Control UI operator sessions with browser device identity skip the device-pairing round trip while still rejecting device-less and node-role connections. Refs #71986. Thanks @jokedul.
 - Doctor: honor `OPENCLAW_SERVICE_REPAIR_POLICY=external` by reporting gateway service health while skipping service install/start/restart/bootstrap, supervisor rewrites, and legacy service cleanup for externally managed environments. Thanks @shakkernerd.
+- CLI/update: run package post-update doctor with `--fix` so package updates repair config migrations before restart. Thanks @shakkernerd.
+- CLI/update: retry failed npm global updates with `--omit=optional` and ignore the superseded first failure when the fallback succeeds. Thanks @shakkernerd.
+- Plugins/uninstall: migrate and reset `plugins.slots.contextEngine` alongside memory slots when plugin ids change or selected plugins are removed. Thanks @shakkernerd.
 - Agents/Discord: keep raw `Agent failed before reply` runner failures out of Discord group/channel chats and show detailed runner errors in direct chats only when `/verbose` is enabled. Thanks @codex.
 - UI/Windows: quote resolved pnpm `.cmd` launcher paths before spawning UI install/build/test commands so Node installs under `C:\Program Files` no longer fail as `C:\Program`. Fixes #45275. Thanks @Kobevictor, @stoppieboy, and @iubns.
 - Codex/agent: translate `--thinking minimal` to `low` for modern Codex models (gpt-5.5, gpt-5.4, gpt-5.4-mini, gpt-5.2) at request build time so the first turn is accepted instead of paying a wasted call + retry-with-low fallback. Older Codex models still receive `minimal` directly. Fixes #71946. Thanks @hclsys.

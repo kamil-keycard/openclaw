@@ -37,6 +37,7 @@ import {
   canResolveRegistryVersionForPackageTarget,
   createGlobalInstallEnv,
   cleanupGlobalRenameDirs,
+  globalInstallFallbackArgs,
   globalInstallArgs,
   resolveExpectedInstalledVersionFromSpec,
   resolveGlobalInstallTarget,
@@ -407,6 +408,21 @@ async function runPackageInstallUpdate(params: {
   });
 
   const steps = [updateStep];
+  let finalInstallStep = updateStep;
+  if (updateStep.exitCode !== 0) {
+    const fallbackArgv = globalInstallFallbackArgs(installTarget, installSpec);
+    if (fallbackArgv) {
+      const fallbackStep = await runUpdateStep({
+        name: "global update (omit optional)",
+        argv: fallbackArgv,
+        env: installEnv,
+        timeoutMs: params.timeoutMs,
+        progress: params.progress,
+      });
+      steps.push(fallbackStep);
+      finalInstallStep = fallbackStep;
+    }
+  }
   let afterVersion = beforeVersion;
 
   const verifiedPackageRoot =
@@ -439,7 +455,7 @@ async function runPackageInstallUpdate(params: {
     if (entryPath) {
       const doctorStep = await runUpdateStep({
         name: `${CLI_NAME} doctor`,
-        argv: [resolveNodeRunner(), entryPath, "doctor", "--non-interactive"],
+        argv: [resolveNodeRunner(), entryPath, "doctor", "--non-interactive", "--fix"],
         env: {
           ...process.env,
           OPENCLAW_UPDATE_IN_PROGRESS: "1",
@@ -451,7 +467,10 @@ async function runPackageInstallUpdate(params: {
     }
   }
 
-  const failedStep = steps.find((step) => step.exitCode !== 0);
+  const failedStep =
+    finalInstallStep.exitCode !== 0
+      ? finalInstallStep
+      : (steps.find((step) => step !== updateStep && step.exitCode !== 0) ?? null);
   return {
     status: failedStep ? "error" : "ok",
     mode: manager,

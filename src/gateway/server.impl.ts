@@ -19,6 +19,7 @@ import { applyPluginAutoEnable } from "../config/plugin-auto-enable.js";
 import { applyConfigOverrides } from "../config/runtime-overrides.js";
 import { resolveMainSessionKey } from "../config/sessions.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
+import { setupKeycardIdentityForGateway } from "../identity/keycard/gateway-startup.js";
 import { clearAgentRunContext } from "../infra/agent-events.js";
 import {
   isDiagnosticsEnabled,
@@ -387,6 +388,16 @@ export async function startGatewayServer(
   if (diagnosticsEnabled) {
     startDiagnosticHeartbeat(undefined, { getConfig: getRuntimeConfig });
   }
+  await startupTrace.measure("gateway.identity.keycard", () =>
+    setupKeycardIdentityForGateway({
+      config: cfgAtStart,
+      log: {
+        info: (message) => log.info(message),
+        warn: (message) => log.warn(message),
+        debug: (message) => log.debug?.(message),
+      },
+    }),
+  );
   setGatewaySigusr1RestartPolicy({ allowExternal: isRestartEnabled(cfgAtStart) });
   setPreRestartDeferralCheck(
     () =>

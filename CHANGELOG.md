@@ -22,7 +22,9 @@ Docs: https://docs.openclaw.ai
 - Control UI: polish the quick settings dashboard grid so common cards align across desktop, tablet, and mobile layouts without wasting horizontal space. Thanks @BunsDev.
 - Matrix/E2EE: add `openclaw matrix encryption setup` to enable Matrix encryption, bootstrap recovery, and print verification status from one setup flow. Thanks @gumadeiras.
 - Agents/compaction: add an opt-in `agents.defaults.compaction.maxActiveTranscriptBytes` preflight trigger that runs normal local compaction when the active JSONL grows too large, requiring transcript rotation so successful compaction moves future turns onto a smaller successor file instead of raw byte-splitting history. Thanks @vincentkoc.
-- CLI/migration: add `openclaw migrate` with plan, dry-run, JSON, pre-migration backup, onboarding detection, archive-only reports, a Claude Code/Desktop importer, and a Hermes importer for configuration, memory/plugin hints, model providers, MCP servers, skills, commands, and supported credentials. Thanks @vincentkoc and @NousResearch.
+- CLI/migration: add a bundled Claude importer that previews and applies Claude Code and Claude Desktop instructions, MCP servers, skills, command prompts, and safe archive/manual-review state. Thanks @vincentkoc.
+- CLI/migration: add `openclaw migrate` with plan, dry-run, JSON, pre-migration backup, onboarding detection, archive-only report copies, and a bundled Hermes importer for configuration, memory/plugin hints, model providers, MCP servers, skills, and supported credentials. Thanks @NousResearch.
+- Gateway/identity: add opt-in macOS `gateway.identity.keycard` flow that mints a workload JWT from the local `keycard-osx-oidcd` daemon, exchanges it with a Keycard zone for opaque per-resource credentials, suppresses per-provider API-key onboarding prompts when a Keycard resource mapping covers the provider, and ships matching `openclaw doctor` checks plus `--keycard-zone-id` / `--keycard-provider` non-interactive flags. Thanks @kamil-keycard.
 
 ### Fixes
 

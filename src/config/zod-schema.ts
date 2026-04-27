@@ -789,6 +789,31 @@ export const OpenClawSchema = z
         channelHealthCheckMinutes: z.number().int().min(0).optional(),
         channelStaleEventThresholdMinutes: z.number().int().min(1).optional(),
         channelMaxRestartsPerHour: z.number().int().min(1).optional(),
+        identity: z
+          .object({
+            keycard: z
+              .object({
+                zoneId: z.string().min(1, "zoneId is required for Keycard identity"),
+                socketPath: z.string().optional(),
+                audience: z.string().optional(),
+                providers: z
+                  .record(
+                    z.string(),
+                    z
+                      .object({
+                        resource: z
+                          .string()
+                          .min(1, "resource is required for a Keycard provider mapping"),
+                      })
+                      .strict(),
+                  )
+                  .optional(),
+              })
+              .strict()
+              .optional(),
+          })
+          .strict()
+          .optional(),
         tailscale: z
           .object({
             mode: z.union([z.literal("off"), z.literal("serve"), z.literal("funnel")]).optional(),

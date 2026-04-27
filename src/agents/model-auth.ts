@@ -36,6 +36,7 @@ import {
   NON_ENV_SECRETREF_MARKER,
 } from "./model-auth-markers.js";
 import {
+  getKeycardProviderLookup,
   requireApiKey,
   resolveAwsSdkEnvVarName,
   type ResolvedProviderAuth,
@@ -608,6 +609,28 @@ export async function resolveApiKeyForProvider(params: {
   const syntheticLocalAuth = resolveSyntheticLocalProviderAuth({ cfg, provider });
   if (syntheticLocalAuth) {
     return syntheticLocalAuth;
+  }
+
+  const keycardLookup = getKeycardProviderLookup();
+  if (keycardLookup) {
+    try {
+      const outcome = await keycardLookup(provider);
+      if (outcome && outcome.ok) {
+        return {
+          apiKey: outcome.apiKey,
+          source: outcome.source,
+          mode: "keycard",
+        };
+      }
+      if (outcome && !outcome.ok) {
+        log.debug?.(
+          `Keycard credential unavailable for provider "${provider}" (${outcome.reason}); falling back.`,
+          { reason: outcome.reason },
+        );
+      }
+    } catch (err) {
+      log.warn?.(`Keycard credential lookup failed for provider "${provider}": ${String(err)}`);
+    }
   }
 
   const hasInlineConfiguredModels =

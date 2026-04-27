@@ -5,6 +5,7 @@ ROOT_DIR="${ROOT_DIR:-$(cd "$DOCKER_E2E_LIB_DIR/../.." && pwd)}"
 
 source "$DOCKER_E2E_LIB_DIR/docker-e2e-logs.sh"
 source "$DOCKER_E2E_LIB_DIR/docker-build.sh"
+source "$DOCKER_E2E_LIB_DIR/docker-e2e-package.sh"
 
 docker_e2e_resolve_image() {
   local default_image="$1"

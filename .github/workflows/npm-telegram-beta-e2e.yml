@@ -1,20 +1,22 @@
-name: NPM Telegram Package E2E
+name: NPM Telegram Beta E2E
 
 on:
   workflow_dispatch:
     inputs:
       package_spec:
-        description: Published OpenClaw package spec to test when no preflight tarball is selected
+        description: Published OpenClaw package spec to test when no artifact is supplied
         required: true
         default: openclaw@beta
         type: string
-      preflight_run_id:
-        description: OpenClaw NPM Release preflight run id whose prepared tarball should be tested instead of npm
+      package_label:
+        description: Optional display label for an artifact-backed package candidate
         required: false
+        default: ""
         type: string
-      preflight_artifact_ref:
-        description: Release tag or full SHA used as the OpenClaw NPM Release preflight input
+      package_artifact_name:
+        description: Advanced package-under-test artifact name; leave blank for registry install
         required: false
+        default: ""
         type: string
       provider_mode:
         description: QA provider mode
@@ -28,8 +30,42 @@ on:
         description: Optional comma-separated Telegram scenario ids
         required: false
         type: string
+  workflow_call:
+    inputs:
+      package_spec:
+        description: Published OpenClaw package spec to test when no artifact is supplied
+        required: true
+        type: string
+      package_artifact_name:
+        description: Optional package-under-test artifact from the current workflow run
+        required: false
+        default: ""
+        type: string
+      package_label:
+        description: Optional display label for an artifact-backed package candidate
+        required: false
+        default: ""
+        type: string
+      provider_mode:
+        description: QA provider mode
+        required: false
+        default: mock-openai
+        type: string
+      scenario:
+        description: Optional comma-separated Telegram scenario ids
+        required: false
+        default: ""
+        type: string
+    secrets:
+      OPENAI_API_KEY:
+        required: false
+      OPENCLAW_QA_CONVEX_SITE_URL:
+        required: false
+      OPENCLAW_QA_CONVEX_SECRET_CI:
+        required: false
 
 permissions:
+  actions: read
   contents: read
 
 concurrency:
@@ -42,8 +78,8 @@ env:
   PNPM_VERSION: "10.33.0"
 
 jobs:
-  run_npm_telegram_beta_e2e:
-    name: Run npm Telegram package E2E
+  run_package_telegram_e2e:
+    name: Run package Telegram E2E
     runs-on: blacksmith-32vcpu-ubuntu-2404
     timeout-minutes: 60
     environment: qa-live-shared
@@ -62,6 +98,8 @@ jobs:
 
       - name: Set up Blacksmith Docker Builder
         uses: useblacksmith/setup-docker-builder@ac083cc84672d01c60d5e8561d0a939b697de542 # v1
+        with:
+          max-cache-size-mb: 800000
 
       - name: Build Docker E2E image
         uses: useblacksmith/build-push-action@cbd1f60d194a98cb3be5523b15134501eaf0fbf3 # v2
@@ -85,8 +123,7 @@ jobs:
       - name: Validate inputs and secrets
         env:
           PACKAGE_SPEC: ${{ inputs.package_spec }}
-          PREFLIGHT_RUN_ID: ${{ inputs.preflight_run_id }}
-          PREFLIGHT_ARTIFACT_REF: ${{ inputs.preflight_artifact_ref }}
+          PACKAGE_ARTIFACT_NAME: ${{ inputs.package_artifact_name || '' }}
           PROVIDER_MODE: ${{ inputs.provider_mode }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           OPENCLAW_QA_CONVEX_SITE_URL: ${{ secrets.OPENCLAW_QA_CONVEX_SITE_URL }}
@@ -95,21 +132,19 @@ jobs:
         run: |
           set -euo pipefail
 
-          if [[ -n "${PREFLIGHT_RUN_ID}" || -n "${PREFLIGHT_ARTIFACT_REF}" ]]; then
-            if [[ -z "${PREFLIGHT_RUN_ID}" || -z "${PREFLIGHT_ARTIFACT_REF}" ]]; then
-              echo "preflight_run_id and preflight_artifact_ref must be supplied together." >&2
-              exit 1
-            fi
-            if [[ ! "${PREFLIGHT_ARTIFACT_REF}" =~ ^v[0-9]{4}\.[1-9][0-9]*\.[1-9][0-9]*((-beta\.[1-9][0-9]*)|(-[1-9][0-9]*))?$ ]] && [[ ! "${PREFLIGHT_ARTIFACT_REF}" =~ ^[0-9a-fA-F]{40}$ ]]; then
-              echo "preflight_artifact_ref must be a release tag or full commit SHA; got: ${PREFLIGHT_ARTIFACT_REF}" >&2
-              exit 1
-            fi
-          else
+          if [[ -z "${PACKAGE_ARTIFACT_NAME// }" ]]; then
             if [[ ! "${PACKAGE_SPEC}" =~ ^openclaw@(beta|latest|[0-9]{4}\.[1-9][0-9]*\.[1-9][0-9]*(-[1-9][0-9]*|-beta\.[1-9][0-9]*)?)$ ]]; then
               echo "package_spec must be openclaw@beta, openclaw@latest, or an exact OpenClaw release version; got: ${PACKAGE_SPEC}" >&2
               exit 1
             fi
           fi
+          case "${PROVIDER_MODE}" in
+            mock-openai | live-frontier) ;;
+            *)
+              echo "provider_mode must be mock-openai or live-frontier; got: ${PROVIDER_MODE}" >&2
+              exit 1
+              ;;
+          esac
 
           require_var() {
             local key="$1"
@@ -125,43 +160,14 @@ jobs:
             require_var OPENAI_API_KEY
           fi
 
-      - name: Download prepared npm tarball
-        if: ${{ inputs.preflight_run_id != '' }}
+      - name: Download package-under-test artifact
+        if: inputs.package_artifact_name != ''
         uses: actions/download-artifact@v8
         with:
-          name: openclaw-npm-preflight-${{ inputs.preflight_artifact_ref }}
-          path: preflight-tarball
-          repository: ${{ github.repository }}
-          run-id: ${{ inputs.preflight_run_id }}
-          github-token: ${{ github.token }}
+          name: ${{ inputs.package_artifact_name }}
+          path: .artifacts/telegram-package-under-test
 
-      - name: Resolve prepared npm tarball
-        if: ${{ inputs.preflight_run_id != '' }}
-        id: prepared_tarball
-        shell: bash
-        env:
-          PREFLIGHT_ARTIFACT_REF: ${{ inputs.preflight_artifact_ref }}
-        run: |
-          set -euo pipefail
-          tag_file="preflight-tarball/release-tag.txt"
-          if [[ ! -f "$tag_file" ]]; then
-            echo "Prepared preflight artifact is missing release-tag.txt." >&2
-            exit 1
-          fi
-          artifact_ref="$(tr -d '\r\n' < "$tag_file")"
-          if [[ "$artifact_ref" != "$PREFLIGHT_ARTIFACT_REF" ]]; then
-            echo "Prepared preflight artifact ref mismatch: expected $PREFLIGHT_ARTIFACT_REF, got $artifact_ref" >&2
-            exit 1
-          fi
-          tarball_path="$(find preflight-tarball -type f -name '*.tgz' -print | sort | tail -n 1)"
-          if [[ -z "$tarball_path" ]]; then
-            echo "Prepared preflight tarball not found." >&2
-            find preflight-tarball -maxdepth 2 -type f -print >&2 || true
-            exit 1
-          fi
-          echo "path=$tarball_path" >> "$GITHUB_OUTPUT"
-
-      - name: Run npm Telegram package E2E
+      - name: Run package Telegram E2E
         id: run_lane
         shell: bash
         env:
@@ -169,7 +175,7 @@ jobs:
           OPENCLAW_SKIP_DOCKER_BUILD: "1"
           OPENCLAW_DOCKER_E2E_IMAGE: openclaw-docker-e2e:local
           OPENCLAW_NPM_TELEGRAM_PACKAGE_SPEC: ${{ inputs.package_spec }}
-          OPENCLAW_NPM_TELEGRAM_PACKAGE_TGZ: ${{ steps.prepared_tarball.outputs.path }}
+          OPENCLAW_NPM_TELEGRAM_PACKAGE_LABEL: ${{ inputs.package_label }}
           OPENCLAW_NPM_TELEGRAM_PROVIDER_MODE: ${{ inputs.provider_mode }}
           OPENCLAW_NPM_TELEGRAM_CREDENTIAL_SOURCE: convex
           OPENCLAW_NPM_TELEGRAM_CREDENTIAL_ROLE: ci
@@ -178,12 +184,27 @@ jobs:
           OPENCLAW_QA_REDACT_PUBLIC_METADATA: "1"
           OPENCLAW_QA_TELEGRAM_CAPTURE_CONTENT: "1"
           INPUT_SCENARIO: ${{ inputs.scenario }}
+          PACKAGE_ARTIFACT_NAME: ${{ inputs.package_artifact_name || '' }}
         run: |
           set -euo pipefail
 
           output_dir=".artifacts/qa-e2e/npm-telegram-beta-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
           echo "output_dir=${output_dir}" >> "$GITHUB_OUTPUT"
           export OPENCLAW_NPM_TELEGRAM_OUTPUT_DIR="${output_dir}"
+
+          if [[ -n "${PACKAGE_ARTIFACT_NAME// }" ]]; then
+            mapfile -t package_tgzs < <(find .artifacts/telegram-package-under-test -type f -name "*.tgz" | sort)
+            if [[ "${#package_tgzs[@]}" -ne 1 ]]; then
+              echo "package artifact ${PACKAGE_ARTIFACT_NAME} must contain exactly one .tgz; found ${#package_tgzs[@]}" >&2
+              exit 1
+            fi
+            export OPENCLAW_NPM_TELEGRAM_PACKAGE_TGZ="${package_tgzs[0]}"
+            if [[ -z "${OPENCLAW_NPM_TELEGRAM_PACKAGE_LABEL// }" ]]; then
+              export OPENCLAW_NPM_TELEGRAM_PACKAGE_LABEL="$(basename "${package_tgzs[0]}")"
+            fi
+          elif [[ -z "${OPENCLAW_NPM_TELEGRAM_PACKAGE_LABEL// }" ]]; then
+            export OPENCLAW_NPM_TELEGRAM_PACKAGE_LABEL="${OPENCLAW_NPM_TELEGRAM_PACKAGE_SPEC}"
+          fi
 
           if [[ -n "${INPUT_SCENARIO// }" ]]; then
             export OPENCLAW_NPM_TELEGRAM_SCENARIOS="${INPUT_SCENARIO}"

@@ -28,6 +28,11 @@ on:
         required: false
         default: ""
         type: string
+      package_artifact_name:
+        description: Existing workflow artifact containing openclaw-current.tgz; blank lets lanes pack the selected ref
+        required: false
+        default: ""
+        type: string
       include_live_suites:
         description: Whether to run live-provider coverage
         required: false
@@ -61,6 +66,11 @@ on:
         type: boolean
       docker_lanes:
         description: Comma/space separated Docker scheduler lane names to run against the prepared image
+        required: false
+        default: ""
+        type: string
+      package_artifact_name:
+        description: Existing workflow artifact containing openclaw-current.tgz; blank lets lanes pack the selected ref
         required: false
         default: ""
         type: string
@@ -443,6 +453,9 @@ jobs:
       OPENCLAW_GEMINI_SETTINGS_JSON: ${{ secrets.OPENCLAW_GEMINI_SETTINGS_JSON }}
       FIREWORKS_API_KEY: ${{ secrets.FIREWORKS_API_KEY }}
       OPENCLAW_DOCKER_E2E_IMAGE: ${{ needs.prepare_docker_e2e_image.outputs.image }}
+      OPENCLAW_CURRENT_PACKAGE_TGZ: ${{ inputs.package_artifact_name != '' && '.artifacts/docker-e2e-package/openclaw-current.tgz' || '' }}
+      OPENCLAW_BUNDLED_CHANNEL_PACKAGE_TGZ: ${{ inputs.package_artifact_name != '' && '.artifacts/docker-e2e-package/openclaw-current.tgz' || '' }}
+      OPENCLAW_NPM_ONBOARD_PACKAGE_TGZ: ${{ inputs.package_artifact_name != '' && '.artifacts/docker-e2e-package/openclaw-current.tgz' || '' }}
       OPENCLAW_SKIP_DOCKER_BUILD: "1"
       INCLUDE_OPENWEBUI: ${{ inputs.include_openwebui }}
       DOCKER_E2E_CHUNK: ${{ matrix.chunk_id }}
@@ -475,6 +488,29 @@ jobs:
         run: |
           set -euo pipefail
           docker pull "${OPENCLAW_DOCKER_E2E_IMAGE}"
+
+      - name: Download package-under-test artifact
+        if: inputs.package_artifact_name != ''
+        uses: actions/download-artifact@v8
+        with:
+          name: ${{ inputs.package_artifact_name }}
+          path: .artifacts/docker-e2e-package
+
+      - name: Normalize package-under-test artifact
+        if: inputs.package_artifact_name != ''
+        shell: bash
+        run: |
+          set -euo pipefail
+          target=".artifacts/docker-e2e-package/openclaw-current.tgz"
+          if [[ ! -f "$target" ]]; then
+            mapfile -t tgzs < <(find .artifacts/docker-e2e-package -type f -name '*.tgz' | sort)
+            if [[ "${#tgzs[@]}" -ne 1 ]]; then
+              echo "Expected exactly one package tarball in .artifacts/docker-e2e-package; found ${#tgzs[@]}." >&2
+              printf '%s\n' "${tgzs[@]}" >&2
+              exit 1
+            fi
+            cp "${tgzs[0]}" "$target"
+          fi
 
       - name: Validate chunk credentials
         shell: bash
@@ -604,6 +640,9 @@ jobs:
       OPENCLAW_GEMINI_SETTINGS_JSON: ${{ secrets.OPENCLAW_GEMINI_SETTINGS_JSON }}
       FIREWORKS_API_KEY: ${{ secrets.FIREWORKS_API_KEY }}
       OPENCLAW_DOCKER_E2E_IMAGE: ${{ needs.prepare_docker_e2e_image.outputs.image }}
+      OPENCLAW_CURRENT_PACKAGE_TGZ: ${{ inputs.package_artifact_name != '' && '.artifacts/docker-e2e-package/openclaw-current.tgz' || '' }}
+      OPENCLAW_BUNDLED_CHANNEL_PACKAGE_TGZ: ${{ inputs.package_artifact_name != '' && '.artifacts/docker-e2e-package/openclaw-current.tgz' || '' }}
+      OPENCLAW_NPM_ONBOARD_PACKAGE_TGZ: ${{ inputs.package_artifact_name != '' && '.artifacts/docker-e2e-package/openclaw-current.tgz' || '' }}
       OPENCLAW_SKIP_DOCKER_BUILD: "1"
       INCLUDE_OPENWEBUI: ${{ inputs.include_openwebui }}
       DOCKER_E2E_LANES: ${{ inputs.docker_lanes }}
@@ -636,6 +675,29 @@ jobs:
         run: |
           set -euo pipefail
           docker pull "${OPENCLAW_DOCKER_E2E_IMAGE}"
+
+      - name: Download package-under-test artifact
+        if: inputs.package_artifact_name != ''
+        uses: actions/download-artifact@v8
+        with:
+          name: ${{ inputs.package_artifact_name }}
+          path: .artifacts/docker-e2e-package
+
+      - name: Normalize package-under-test artifact
+        if: inputs.package_artifact_name != ''
+        shell: bash
+        run: |
+          set -euo pipefail
+          target=".artifacts/docker-e2e-package/openclaw-current.tgz"
+          if [[ ! -f "$target" ]]; then
+            mapfile -t tgzs < <(find .artifacts/docker-e2e-package -type f -name '*.tgz' | sort)
+            if [[ "${#tgzs[@]}" -ne 1 ]]; then
+              echo "Expected exactly one package tarball in .artifacts/docker-e2e-package; found ${#tgzs[@]}." >&2
+              printf '%s\n' "${tgzs[@]}" >&2
+              exit 1
+            fi
+            cp "${tgzs[0]}" "$target"
+          fi
 
       - name: Validate targeted lane credentials
         shell: bash

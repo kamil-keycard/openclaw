@@ -88,4 +88,15 @@ export type OnboardOptions = OnboardDynamicProviderOptions & {
   importSource?: string;
   importSecrets?: boolean;
   json?: boolean;
+  /**
+   * Optional Keycard zone id. Enables `gateway.identity.keycard` so per-provider
+   * API-key prompts can be skipped during onboarding for any provider that has
+   * a (configured or defaulted) Keycard resource mapping.
+   */
+  keycardZoneId?: string;
+  /**
+   * Repeatable `provider=resource` mappings for `gateway.identity.keycard.providers.*`.
+   * Built-in defaults (Anthropic, OpenAI) are applied when this is empty.
+   */
+  keycardProvider?: string[];
 };

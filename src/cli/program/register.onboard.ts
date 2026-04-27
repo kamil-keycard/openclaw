@@ -173,6 +173,16 @@ export function registerOnboardCommand(program: Command) {
     .option("--import-from <provider>", "Migration provider to run during onboarding")
     .option("--import-source <path>", "Source agent home for --import-from")
     .option("--import-secrets", "Import supported secrets during onboarding migration", false)
+    .option(
+      "--keycard-zone-id <id>",
+      "Enable Keycard identity by zone id (skips API-key prompts for mapped providers)",
+    )
+    .option(
+      "--keycard-provider <provider=resource>",
+      "Map a provider to a Keycard resource (repeatable; e.g. anthropic=urn:secret:claude-api)",
+      (value: string, previous: string[] = []) => [...previous, value],
+      [],
+    )
     .option("--json", "Output JSON summary", false);
 
   command.action(async (opts, commandRuntime) => {
@@ -249,6 +259,10 @@ export function registerOnboardCommand(program: Command) {
           importFrom: opts.importFrom as string | undefined,
           importSource: opts.importSource as string | undefined,
           importSecrets: Boolean(opts.importSecrets),
+          keycardZoneId: opts.keycardZoneId as string | undefined,
+          keycardProvider: Array.isArray(opts.keycardProvider)
+            ? (opts.keycardProvider as string[])
+            : undefined,
           json: Boolean(opts.json),
         },
         defaultRuntime,

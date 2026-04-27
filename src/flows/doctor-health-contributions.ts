@@ -319,6 +319,14 @@ async function runOpenAIOAuthTlsHealth(ctx: DoctorHealthFlowContext): Promise<vo
   });
 }
 
+async function runKeycardIdentityHealth(ctx: DoctorHealthFlowContext): Promise<void> {
+  const { emitKeycardIdentityDoctor } = await import("../commands/doctor-keycard-identity.js");
+  const { note } = await import("../terminal/note.js");
+  await emitKeycardIdentityDoctor(ctx.cfg, note, {
+    deep: ctx.options.deep === true,
+  });
+}
+
 async function runHooksModelHealth(ctx: DoctorHealthFlowContext): Promise<void> {
   if (!ctx.cfg.hooks?.gmail?.model?.trim()) {
     return;
@@ -619,6 +627,11 @@ export function resolveDoctorHealthContributions(): DoctorHealthContribution[] {
       id: "doctor:oauth-tls",
       label: "OAuth TLS",
       run: runOpenAIOAuthTlsHealth,
+    }),
+    createDoctorHealthContribution({
+      id: "doctor:keycard-identity",
+      label: "Keycard identity",
+      run: runKeycardIdentityHealth,
     }),
     createDoctorHealthContribution({
       id: "doctor:hooks-model",

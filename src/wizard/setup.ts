@@ -585,6 +585,16 @@ export async function runSetupWizard(
       allowKeychainPrompt: false,
     });
   }
+  // Optional Keycard identity step. Always offered before per-provider auth
+  // prompts so any provider it covers can short-circuit its prompt later.
+  if (authChoiceFromPrompt) {
+    const { promptKeycardIdentitySetup } = await import("./setup.keycard-identity.js");
+    const keycardResult = await promptKeycardIdentitySetup({
+      config: nextConfig,
+      prompter,
+    });
+    nextConfig = keycardResult.config;
+  }
   while (true) {
     if (authChoiceFromPrompt) {
       authChoice = await promptAuthChoiceGrouped!({

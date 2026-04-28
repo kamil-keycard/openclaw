@@ -28,7 +28,16 @@ export type SignalSseEvent = {
   id?: string;
 };
 
-const DEFAULT_TIMEOUT_MS = 10_000;
+// Header-arrival timeout for the signal-cli SSE endpoint. The default of 10s is
+// too aggressive: signal-cli often takes longer than that to flush response
+// headers because it gates the response on the receive subscription being
+// fully active, which in turn waits for the upstream Signal websocket. When
+// it times out the gateway tears down the request and reconnects, and the
+// receive lock can stay parked, causing an indefinite reconnect loop.
+// 60s gives signal-cli enough room to actually start streaming on first run
+// without changing behaviour for healthy connections (which flush headers
+// well within a second).
+const DEFAULT_TIMEOUT_MS = 60_000;
 const MAX_SIGNAL_HTTP_RESPONSE_BYTES = 1_048_576;
 const MAX_SIGNAL_SSE_BUFFER_BYTES = 1_048_576;
 const MAX_SIGNAL_SSE_EVENT_DATA_BYTES = 1_048_576;

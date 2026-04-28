@@ -403,6 +403,41 @@ export type GatewayWebchatConfig = {
   chatHistoryMaxChars?: number;
 };
 
+/**
+ * Per-provider Keycard mapping. The `resource` field is forwarded as the
+ * RFC 8707 resource indicator on the OAuth client-credentials grant.
+ */
+export type GatewayKeycardProviderConfig = {
+  /** RFC 8707 resource indicator (URL or URN). Required. */
+  resource: string;
+};
+
+/**
+ * Local-OIDC + Keycard identity configuration. When set, the gateway will
+ * mint workload JWTs from the local `keycard-osx-oidcd` daemon (macOS only)
+ * and exchange them with Keycard for opaque access tokens that are used as
+ * provider API keys. Off-macOS the gateway logs a warning and keeps the
+ * legacy auth flow.
+ */
+export type GatewayKeycardIdentityConfig = {
+  /** Required Keycard zone id (e.g. `o36mbsre94s2vlt8x5jq6nbxs0`). */
+  zoneId: string;
+  /** Path to the daemon UDS (default: `/var/run/keycard-osx-oidcd.sock`). */
+  socketPath?: string;
+  /** Override the JWT audience (default: discovered token endpoint). */
+  audience?: string;
+  /**
+   * Per-provider resource mapping. Built-in defaults map `anthropic` →
+   * `urn:secret:claude-api` and `openai` → `urn:secret:openai-api` when
+   * omitted; explicit entries always win.
+   */
+  providers?: Record<string, GatewayKeycardProviderConfig>;
+};
+
+export type GatewayIdentityConfig = {
+  keycard?: GatewayKeycardIdentityConfig;
+};
+
 export type GatewayConfig = {
   /** Single multiplexed port for Gateway WS + HTTP (default: 18789). */
   port?: number;
@@ -465,4 +500,6 @@ export type GatewayConfig = {
    * the rolling window expires. Default: 10.
    */
   channelMaxRestartsPerHour?: number;
+  /** Local-OIDC + Keycard identity configuration (macOS only). */
+  identity?: GatewayIdentityConfig;
 };

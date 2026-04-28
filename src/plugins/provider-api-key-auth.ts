@@ -1,6 +1,7 @@
 import { upsertAuthProfile } from "../agents/auth-profiles/profiles.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import type { SecretInput } from "../config/types.secrets.js";
+import { describeKeycardMappingForProvider } from "../identity/keycard/types.js";
 import { createLazyRuntimeSurface } from "../shared/lazy-runtime.js";
 import { normalizeOptionalString } from "../shared/string-coerce.js";
 import { normalizeStringEntries } from "../shared/string-normalization.js";
@@ -89,6 +90,21 @@ export function createProviderApiKeyAuthMethod(
     kind: "api_key",
     wizard: params.wizard,
     run: async (ctx) => {
+      const keycardMapping = describeKeycardMappingForProvider(ctx.config, params.providerId);
+      if (keycardMapping) {
+        // Keycard covers this provider; surface a confirmation and skip the
+        // API-key prompt + auth-profile write entirely. Runtime resolution in
+        // `model-auth.ts` will mint the upstream credential on demand.
+        await ctx.prompter.note(
+          `${params.label} credentials will be obtained from Keycard.\nResource: ${keycardMapping.resource}\nZone: ${keycardMapping.zoneId}`,
+          "Keycard managed credentials",
+        );
+        return {
+          profiles: [],
+          ...(params.applyConfig ? { configPatch: params.applyConfig(ctx.config) } : {}),
+          ...(params.defaultModel ? { defaultModel: params.defaultModel } : {}),
+        };
+      }
       const opts = ctx.opts as Record<string, unknown> | undefined;
       const flagValue = resolveStringOption(opts, params.optionKey);
       let capturedSecretInput: SecretInput | undefined;
@@ -154,6 +170,17 @@ export function createProviderApiKeyAuthMethod(
       };
     },
     runNonInteractive: async (ctx) => {
+      if (describeKeycardMappingForProvider(ctx.config, params.providerId)) {
+        // Keycard covers this provider in non-interactive flows: skip flag/env
+        // resolution and auth-profile writes; runtime resolution mints on demand.
+        return await applyApiKeyConfig({
+          ctx,
+          providerId: params.providerId,
+          profileIds: [],
+          defaultModel: params.defaultModel,
+          applyConfig: params.applyConfig,
+        });
+      }
       const opts = ctx.opts as Record<string, unknown> | undefined;
       const resolved = await ctx.resolveApiKey({
         provider: params.providerId,

@@ -4,6 +4,34 @@ import { secretRefKey } from "../secrets/ref-contract.js";
 import { resolveSecretRefValues } from "../secrets/resolve.js";
 import { normalizeOptionalString } from "../shared/string-coerce.js";
 
+/**
+ * Best-effort extraction of the agent id from a config path. Paths under
+ * `agents.list.<id>.*` carry the agent context for keycard-scoped secret
+ * resolution; everything else (top-level config) returns `undefined` and
+ * falls back to the gateway-shared identity.
+ *
+ * Numeric segments (array indices, used by some collectors before agent
+ * ids are looked up) are ignored so we never accidentally exchange a
+ * keycard token for `agent_id="0"`.
+ */
+export function deriveAgentIdFromConfigPath(path: string): string | undefined {
+  const segments = path.split(".");
+  if (segments.length < 3) {
+    return undefined;
+  }
+  if (segments[0] !== "agents" || segments[1] !== "list") {
+    return undefined;
+  }
+  const id = segments[2]?.trim();
+  if (!id) {
+    return undefined;
+  }
+  if (/^\d+$/.test(id)) {
+    return undefined;
+  }
+  return id;
+}
+
 export type SecretInputUnresolvedReasonStyle = "generic" | "detailed"; // pragma: allowlist secret
 export type ConfiguredSecretInputSource =
   | "config"
@@ -34,6 +62,13 @@ export async function resolveConfiguredSecretInputString(params: {
   value: unknown;
   path: string;
   unresolvedReasonStyle?: SecretInputUnresolvedReasonStyle;
+  /**
+   * Optional agent id used when resolving `keycard:*` refs. Pass undefined
+   * (or omit) for paths that should resolve against the gateway-shared
+   * identity. Defaults to the agent id parsed out of `params.path` when it
+   * lives under `agents.list.<id>.*`.
+   */
+  agentId?: string;
 }): Promise<{ value?: string; unresolvedRefReason?: string }> {
   const style = params.unresolvedReasonStyle ?? "generic";
   const { ref } = resolveSecretInputRef({
@@ -43,12 +78,14 @@ export async function resolveConfiguredSecretInputString(params: {
   if (!ref) {
     return { value: normalizeOptionalString(params.value) };
   }
+  const agentId = params.agentId ?? deriveAgentIdFromConfigPath(params.path);
 
   const refLabel = `${ref.source}:${ref.provider}:${ref.id}`;
   try {
     const resolved = await resolveSecretRefValues([ref], {
       config: params.config,
       env: params.env,
+      ...(agentId !== undefined ? { agentId } : {}),
     });
     const resolvedValue = resolved.get(secretRefKey(ref));
     if (typeof resolvedValue !== "string") {
@@ -92,6 +129,7 @@ export async function resolveConfiguredSecretInputWithFallback(params: {
   path: string;
   unresolvedReasonStyle?: SecretInputUnresolvedReasonStyle;
   readFallback?: () => string | undefined;
+  agentId?: string;
 }): Promise<{
   value?: string;
   source?: ConfiguredSecretInputSource;
@@ -128,6 +166,7 @@ export async function resolveConfiguredSecretInputWithFallback(params: {
     value: params.value,
     path: params.path,
     unresolvedReasonStyle: params.unresolvedReasonStyle,
+    ...(params.agentId !== undefined ? { agentId: params.agentId } : {}),
   });
   if (resolved.value) {
     return {
@@ -158,6 +197,7 @@ export async function resolveRequiredConfiguredSecretRefInputString(params: {
   value: unknown;
   path: string;
   unresolvedReasonStyle?: SecretInputUnresolvedReasonStyle;
+  agentId?: string;
 }): Promise<string | undefined> {
   const { ref } = resolveSecretInputRef({
     value: params.value,
@@ -173,6 +213,7 @@ export async function resolveRequiredConfiguredSecretRefInputString(params: {
     value: params.value,
     path: params.path,
     unresolvedReasonStyle: params.unresolvedReasonStyle,
+    ...(params.agentId !== undefined ? { agentId: params.agentId } : {}),
   });
   if (resolved.value) {
     return resolved.value;

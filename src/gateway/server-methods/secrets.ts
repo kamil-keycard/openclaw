@@ -25,7 +25,11 @@ function invalidSecretsResolveField(
 
 export function createSecretsHandlers(params: {
   reloadSecrets: () => Promise<{ warningCount: number }>;
-  resolveSecrets: (params: { commandName: string; targetIds: string[] }) => Promise<{
+  resolveSecrets: (params: {
+    commandName: string;
+    targetIds: string[];
+    agentId?: string;
+  }) => Promise<{
     assignments: Array<{
       path: string;
       pathSegments: string[];
@@ -85,10 +89,13 @@ export function createSecretsHandlers(params: {
         }
       }
 
+      const agentId = requestParams.agentId?.trim() || undefined;
+
       try {
         const result = await params.resolveSecrets({
           commandName,
           targetIds,
+          ...(agentId !== undefined ? { agentId } : {}),
         });
         const payload = {
           ok: true,

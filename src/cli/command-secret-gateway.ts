@@ -419,6 +419,7 @@ async function resolveCommandSecretRefsLocally(params: {
   preflightDiagnostics: string[];
   mode: CommandSecretResolutionMode;
   allowedPaths?: ReadonlySet<string>;
+  agentId?: string;
 }): Promise<ResolveCommandSecretsResult> {
   const sourceConfig = params.config;
   const resolvedConfig = structuredClone(params.config);
@@ -505,6 +506,7 @@ async function resolveCommandSecretRefsLocally(params: {
       mode: params.mode,
       commandName: params.commandName,
       localResolutionDiagnostics,
+      ...(params.agentId !== undefined ? { agentId: params.agentId } : {}),
     });
   }
   const analyzed = commandSecretGatewayDeps.analyzeCommandSecretAssignmentsFromSnapshot({
@@ -611,6 +613,7 @@ async function resolveTargetSecretLocally(params: {
   mode: CommandSecretResolutionMode;
   commandName: string;
   localResolutionDiagnostics: string[];
+  agentId?: string;
 }): Promise<void> {
   const defaults = params.sourceConfig.secrets?.defaults;
   const { ref } = resolveSecretInputRef({
@@ -632,6 +635,7 @@ async function resolveTargetSecretLocally(params: {
       config: params.sourceConfig,
       env: params.env,
       cache: params.cache,
+      ...(params.agentId !== undefined ? { agentId: params.agentId } : {}),
     });
     assertExpectedResolvedSecretValue({
       value: resolved,
@@ -657,6 +661,11 @@ export async function resolveCommandSecretRefsViaGateway(params: {
   targetIds: Set<string>;
   mode?: CommandSecretResolutionModeInput;
   allowedPaths?: ReadonlySet<string>;
+  /**
+   * Optional agent id used when resolving `keycard:*` refs. When set the
+   * gateway and local fallback both scope the keycard JWT to this agent.
+   */
+  agentId?: string;
 }): Promise<ResolveCommandSecretsResult> {
   const mode = normalizeCommandSecretResolutionMode(params.mode);
   const configuredTargetRefPaths = collectConfiguredTargetRefPaths({
@@ -694,6 +703,7 @@ export async function resolveCommandSecretRefsViaGateway(params: {
       params: {
         commandName: params.commandName,
         targetIds: [...params.targetIds],
+        ...(params.agentId !== undefined ? { agentId: params.agentId } : {}),
       },
       timeoutMs: 30_000,
       clientName: GATEWAY_CLIENT_NAMES.CLI,
@@ -708,6 +718,7 @@ export async function resolveCommandSecretRefsViaGateway(params: {
         preflightDiagnostics: preflight.diagnostics,
         mode,
         allowedPaths: params.allowedPaths,
+        ...(params.agentId !== undefined ? { agentId: params.agentId } : {}),
       });
       const recoveredLocally = Object.values(fallback.targetStatesByPath).some(
         (state) => state === "resolved_local",
@@ -782,6 +793,7 @@ export async function resolveCommandSecretRefsViaGateway(params: {
         preflightDiagnostics: [],
         mode,
         allowedPaths: new Set(analyzed.unresolved.map((entry) => entry.path)),
+        ...(params.agentId !== undefined ? { agentId: params.agentId } : {}),
       });
       for (const unresolved of analyzed.unresolved) {
         if (localFallback.targetStatesByPath[unresolved.path] !== "resolved_local") {

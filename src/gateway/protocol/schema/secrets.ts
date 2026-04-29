@@ -7,6 +7,13 @@ export const SecretsResolveParamsSchema = Type.Object(
   {
     commandName: NonEmptyString,
     targetIds: Type.Array(NonEmptyString),
+    /**
+     * Optional agent id. When set the gateway resolves `keycard:*` refs
+     * against a JWT carrying this `agent_id` claim; other sources ignore it
+     * and read the gateway-shared configuration. Defaults to the agent id
+     * parsed from the connection's session key (server-side).
+     */
+    agentId: Type.Optional(NonEmptyString),
   },
   { additionalProperties: false },
 );

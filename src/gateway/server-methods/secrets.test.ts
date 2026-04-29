@@ -26,13 +26,18 @@ async function invokeSecretsResolve(params: {
   respond: ReturnType<typeof vi.fn>;
   commandName: unknown;
   targetIds: unknown;
+  agentId?: unknown;
 }) {
+  const requestParams: Record<string, unknown> = {
+    commandName: params.commandName,
+    targetIds: params.targetIds,
+  };
+  if (params.agentId !== undefined) {
+    requestParams.agentId = params.agentId;
+  }
   await params.handlers["secrets.resolve"]({
     req: { type: "req", id: "1", method: "secrets.resolve" },
-    params: {
-      commandName: params.commandName,
-      targetIds: params.targetIds,
-    },
+    params: requestParams,
     client: null,
     isWebchatConnect: () => false,
     respond: params.respond as unknown as Parameters<
@@ -45,7 +50,11 @@ async function invokeSecretsResolve(params: {
 describe("secrets handlers", () => {
   function createHandlers(overrides?: {
     reloadSecrets?: () => Promise<{ warningCount: number }>;
-    resolveSecrets?: (params: { commandName: string; targetIds: string[] }) => Promise<{
+    resolveSecrets?: (params: {
+      commandName: string;
+      targetIds: string[];
+      agentId?: string;
+    }) => Promise<{
       assignments: Array<{ path: string; pathSegments: string[]; value: unknown }>;
       diagnostics: string[];
       inactiveRefPaths: string[];
@@ -186,6 +195,49 @@ describe("secrets handlers", () => {
         message: 'invalid secrets.resolve params: unknown target id "unknown.target"',
       }),
     );
+  });
+
+  it("forwards agentId to the resolve handler when provided", async () => {
+    const resolveSecrets = vi.fn().mockResolvedValue({
+      assignments: [],
+      diagnostics: [],
+      inactiveRefPaths: [],
+    });
+    const handlers = createHandlers({ resolveSecrets });
+    const respond = vi.fn();
+    await invokeSecretsResolve({
+      handlers,
+      respond,
+      commandName: "memory status",
+      targetIds: ["talk.providers.*.apiKey"],
+      agentId: "billing-bot",
+    });
+    expect(resolveSecrets).toHaveBeenCalledWith({
+      commandName: "memory status",
+      targetIds: ["talk.providers.*.apiKey"],
+      agentId: "billing-bot",
+    });
+  });
+
+  it("treats blank agentId as the gateway-shared identity", async () => {
+    const resolveSecrets = vi.fn().mockResolvedValue({
+      assignments: [],
+      diagnostics: [],
+      inactiveRefPaths: [],
+    });
+    const handlers = createHandlers({ resolveSecrets });
+    const respond = vi.fn();
+    await invokeSecretsResolve({
+      handlers,
+      respond,
+      commandName: "memory status",
+      targetIds: ["talk.providers.*.apiKey"],
+      agentId: "   ",
+    });
+    expect(resolveSecrets).toHaveBeenCalledWith({
+      commandName: "memory status",
+      targetIds: ["talk.providers.*.apiKey"],
+    });
   });
 
   it("returns unavailable when secrets.resolve handler returns an invalid payload shape", async () => {

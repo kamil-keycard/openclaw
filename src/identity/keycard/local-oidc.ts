@@ -47,6 +47,13 @@ export type LocalIdentityClientOptions = {
 export type LocalIdentityRequest = {
   /** Audience to embed in the issued JWT (typically the Keycard token endpoint). */
   audience: string;
+  /**
+   * Optional agent id to forward via `--agent <id>`. The daemon embeds the
+   * value as an `agent_id` claim. v1 trust model: the daemon does not
+   * authenticate the caller, so this claim is only as trustworthy as the
+   * local OS user.
+   */
+  agentId?: string;
 } & LocalIdentityClientOptions;
 
 export type LocalIdentityAvailability = {
@@ -150,9 +157,14 @@ export async function requestLocalIdentityToken(
   }
   const binary = request.binaryPath ?? DEFAULT_CLI_BINARY;
   const timeoutMs = request.timeoutMs ?? DEFAULT_TOKEN_TIMEOUT_MS;
+  const agentId = request.agentId?.trim();
+  const args = ["token", "--audience", audience];
+  if (agentId) {
+    args.push("--agent", agentId);
+  }
   let stdout: string;
   try {
-    const result = await execFileAsync(binary, ["token", "--audience", audience], {
+    const result = await execFileAsync(binary, args, {
       timeout: timeoutMs,
       maxBuffer: 64 * 1024,
       windowsHide: true,
@@ -181,6 +193,7 @@ export async function requestLocalIdentityToken(
     audience,
     expiresAt,
     sub: typeof claims.sub === "string" ? claims.sub : undefined,
+    agentId: agentId || undefined,
   });
   return { token, expiresAt, claims };
 }
@@ -190,9 +203,19 @@ type CacheEntry = {
   expiresAt: number;
 };
 
+const GATEWAY_AGENT_CACHE_SLOT = "_gateway";
+
+function tokenCacheKey(audience: string, agentId: string | undefined): string {
+  return `${audience}|${agentId ?? GATEWAY_AGENT_CACHE_SLOT}`;
+}
+
 /**
- * Per-audience in-process cache. We refresh the token ~5 minutes before `exp`
- * to give downstream Keycard token exchanges plenty of headroom.
+ * Per-(audience, agentId) in-process cache. We refresh the token ~5 minutes
+ * before `exp` to give downstream Keycard token exchanges plenty of headroom.
+ *
+ * Tokens for the bare gateway identity (no `agentId`) and for each agent
+ * cache independently; passing the same audience with different agent ids
+ * mints distinct JWTs (each with its own `agent_id` claim).
  */
 export class LocalIdentityTokenCache {
   private readonly entries = new Map<string, CacheEntry>();
@@ -202,17 +225,24 @@ export class LocalIdentityTokenCache {
     private readonly now: () => number = Date.now,
   ) {}
 
-  async getToken(audience: string): Promise<LocalIdentityToken> {
-    const key = audience.trim();
-    if (!key) {
+  async getToken(audience: string, agentId?: string): Promise<LocalIdentityToken> {
+    const audienceKey = audience.trim();
+    if (!audienceKey) {
       throw new LocalIdentityRequestError("Audience is required to mint a local identity token.");
     }
+    const normalizedAgentId = agentId?.trim() || undefined;
+    const key = tokenCacheKey(audienceKey, normalizedAgentId);
     const existing = this.entries.get(key);
     const cutoff = this.now() + REFRESH_SKEW_MS;
     if (existing && existing.expiresAt * 1_000 > cutoff) {
       return existing.promise;
     }
-    const pending = requestLocalIdentityToken({ ...this.options, audience: key }).then(
+    const request: LocalIdentityRequest = {
+      ...this.options,
+      audience: audienceKey,
+      ...(normalizedAgentId !== undefined ? { agentId: normalizedAgentId } : {}),
+    };
+    const pending = requestLocalIdentityToken(request).then(
       (token) => {
         this.entries.set(key, { promise: Promise.resolve(token), expiresAt: token.expiresAt });
         return token;
@@ -226,11 +256,26 @@ export class LocalIdentityTokenCache {
     return pending;
   }
 
-  invalidate(audience?: string): void {
+  /**
+   * Drop cached tokens. Pass nothing to clear the entire cache, an audience
+   * to clear all agent variants for that audience, or both audience and
+   * agentId to drop a single entry.
+   */
+  invalidate(audience?: string, agentId?: string): void {
     if (audience === undefined) {
       this.entries.clear();
       return;
     }
-    this.entries.delete(audience.trim());
+    const audienceKey = audience.trim();
+    if (agentId !== undefined) {
+      this.entries.delete(tokenCacheKey(audienceKey, agentId.trim() || undefined));
+      return;
+    }
+    const prefix = `${audienceKey}|`;
+    for (const key of this.entries.keys()) {
+      if (key.startsWith(prefix)) {
+        this.entries.delete(key);
+      }
+    }
   }
 }

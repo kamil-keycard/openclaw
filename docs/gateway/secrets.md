@@ -79,7 +79,7 @@ If validation fails, onboarding shows the error and lets you retry.
 Use one object shape everywhere:
 
 ```json5
-{ source: "env" | "file" | "exec", provider: "default", id: "..." }
+{ source: "env" | "file" | "exec" | "keycard", provider: "default", id: "..." }
 ```
 
 <Tabs>
@@ -118,6 +118,23 @@ Use one object shape everywhere:
     - `id` must not contain `.` or `..` as slash-delimited path segments (for example `a/../b` is rejected)
 
   </Tab>
+  <Tab title="keycard">
+    ```json5
+    { source: "keycard", provider: "keycard", id: "urn:secret:billing-bot/openai" }
+    ```
+
+    Validation:
+
+    - `provider` must match `^[a-z][a-z0-9_-]{0,63}$`
+    - `id` is a non-empty Keycard resource indicator (RFC 8707): a URN
+      (`urn:...`) or `https://` URL.
+    - Resolution requires `gateway.identity.keycard` to be configured and
+      the `keycard-osx-oidcd` daemon to be reachable; off-macOS hosts
+      fail closed.
+    - Per-agent scoping is automatic when the ref lives under
+      `agents.list.<id>.*`. See [Keycard local OIDC identity](../identity/keycard-local-oidc.md#per-agent-identity---agent-id) for daemon and policy details.
+
+  </Tab>
 </Tabs>
 
 ## Provider config
@@ -141,11 +158,13 @@ Define providers under `secrets.providers`:
         passEnv: ["PATH", "VAULT_ADDR"],
         jsonOnly: true,
       },
+      keycard: { source: "keycard" },
     },
     defaults: {
       env: "default",
       file: "filemain",
       exec: "vault",
+      keycard: "keycard",
     },
     resolution: {
       maxProviderConcurrency: 4,
@@ -168,6 +187,17 @@ Define providers under `secrets.providers`:
     - `mode: "singleValue"` expects ref id `"value"` and returns file contents.
     - Path must pass ownership/permission checks.
     - Windows fail-closed note: if ACL verification is unavailable for a path, resolution fails. For trusted paths only, set `allowInsecurePath: true` on that provider to bypass path security checks.
+
+  </Accordion>
+  <Accordion title="Keycard provider">
+    - macOS-only; relies on `gateway.identity.keycard` and the
+      `keycard-osx-oidcd` daemon (see [Keycard local OIDC identity](../identity/keycard-local-oidc.md)).
+    - Provider config carries no fields beyond `source: "keycard"`. Zone, audience, and provider-mapping defaults come from `gateway.identity.keycard`.
+    - The ref `id` is a Keycard resource indicator (RFC 8707): a URN like `urn:secret:billing-bot/openai` or an `https://` URL. Empty ids are rejected.
+    - Resolved value is the opaque `access_token` returned by Keycard token exchange. OpenClaw forwards it to the upstream provider without interpretation.
+    - Per-agent scoping: when the ref lives under `agents.list.<id>.*` (or the caller passes an explicit `agentId` to `secrets.resolve`), the resolver invokes the daemon with `--agent <id>` so the JWT carries an `agent_id` claim. Keycard policy can then gate the resource on that claim. Without an agent context the gateway-shared identity is used.
+    - Tokens are cached per `(audience, agentId)` for the local JWT and per `(resource, agentId)` for exchanged access tokens, with bounded LRU eviction.
+    - v1 trust boundary: any local process running as the same user can ask the daemon for a token for any agent id. Treat the gateway and daemon as a single trust boundary.
 
   </Accordion>
   <Accordion title="Exec provider">

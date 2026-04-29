@@ -36,6 +36,14 @@ const log: SubsystemLogger = createSubsystemLogger("identity/keycard/resolver");
 const REFRESH_SKEW_SECONDS = 60;
 const MIN_TOKEN_TTL_SECONDS = 30;
 const FALLBACK_TOKEN_TTL_SECONDS = 5 * 60;
+/**
+ * Soft bound on the per-resource token cache. Per-agent resolution multiplies
+ * cache fanout by the active agent count, so we cap entries to keep a
+ * runaway agent population from growing the cache unbounded. Eviction is
+ * insertion-order LRU on cache miss.
+ */
+const DEFAULT_EXCHANGE_CACHE_MAX_ENTRIES = 256;
+const GATEWAY_AGENT_CACHE_SLOT = "_gateway";
 
 export type KeycardResolverOptions = {
   identity: KeycardIdentityConfig;
@@ -49,6 +57,22 @@ export type KeycardResolverOptions = {
   exchangeOptions?: ExchangeOptions;
   /** Override local-identity CLI options (binary path, timeout, socket path). */
   localIdentityOptions?: LocalIdentityClientOptions;
+  /**
+   * Soft cap for per-(resource, agent) cached tokens. Defaults to 256 — large
+   * enough for typical deployments while still bounding memory if agents are
+   * created/destroyed rapidly. Insertion-order LRU on miss.
+   */
+  exchangeCacheMaxEntries?: number;
+};
+
+/** Per-call options for resource/provider resolution. */
+export type ResolveOptions = {
+  /**
+   * Optional agent id. When set the resolver mints a JWT carrying an
+   * `agent_id` claim (forwarded to the daemon as `--agent`) and caches the
+   * exchanged access token under a key scoped to this agent.
+   */
+  agentId?: string;
 };
 
 export type KeycardResolveOutcome =
@@ -71,14 +95,16 @@ export type KeycardResolver = {
   /**
    * Resolve a Keycard resource indicator to an opaque access token, returning
    * a tagged outcome rather than throwing so callers can fall through to
-   * legacy auth.
+   * legacy auth. Pass `options.agentId` to bind the exchange to a per-agent
+   * `agent_id` JWT claim.
    */
-  resolveResource(resource: string): Promise<KeycardResolveOutcome>;
+  resolveResource(resource: string, options?: ResolveOptions): Promise<KeycardResolveOutcome>;
   /** Resolve the resource for `providerId` (after layering defaults). */
-  resolveProvider(providerId: string): Promise<KeycardResolveOutcome>;
+  resolveProvider(providerId: string, options?: ResolveOptions): Promise<KeycardResolveOutcome>;
   /**
    * Warm caches for all configured resources. Returns the per-resource
-   * outcomes so the caller can log/diagnose individually.
+   * outcomes so the caller can log/diagnose individually. Operates on the
+   * gateway-scoped identity (no `agentId`).
    */
   prefetch(): Promise<{ resource: string; outcome: KeycardResolveOutcome }[]>;
   /** Drop cached tokens (and rediscovery state). */
@@ -91,11 +117,19 @@ type CachedAccessToken = {
   expiresAtMs: number;
 };
 
+function exchangeCacheKey(resource: string, agentId: string | undefined): string {
+  return `${resource}|${agentId ?? GATEWAY_AGENT_CACHE_SLOT}`;
+}
+
 export function createKeycardResolver(options: KeycardResolverOptions): KeycardResolver {
   const identity = options.identity;
   const now = options.now ?? Date.now;
   const localIdentityCache = new LocalIdentityTokenCache(options.localIdentityOptions ?? {}, now);
   const exchangeCache = new Map<string, CachedAccessToken>();
+  const exchangeCacheMaxEntries =
+    options.exchangeCacheMaxEntries && options.exchangeCacheMaxEntries > 0
+      ? options.exchangeCacheMaxEntries
+      : DEFAULT_EXCHANGE_CACHE_MAX_ENTRIES;
   let discoveryPromise: Promise<AuthorizationServerMetadata> | undefined;
 
   const ensureMetadata = (): Promise<AuthorizationServerMetadata> => {
@@ -114,13 +148,14 @@ export function createKeycardResolver(options: KeycardResolverOptions): KeycardR
 
   const mintAccessToken = async (
     resource: string,
+    agentId: string | undefined,
   ): Promise<{
     accessToken: string;
     expiresAtMs: number;
   }> => {
     const metadata = await ensureMetadata();
     const audience = identity.audience?.trim() || metadata.token_endpoint;
-    const localToken = await localIdentityCache.getToken(audience);
+    const localToken = await localIdentityCache.getToken(audience, agentId);
     const exchange = await exchangeForResource(
       {
         tokenEndpoint: metadata.token_endpoint,
@@ -142,34 +177,53 @@ export function createKeycardResolver(options: KeycardResolverOptions): KeycardR
     };
   };
 
-  const getOrMint = (resource: string) => {
-    const existing = exchangeCache.get(resource);
+  const evictOldestIfNeeded = (): void => {
+    while (exchangeCache.size >= exchangeCacheMaxEntries) {
+      const oldest = exchangeCache.keys().next();
+      if (oldest.done) {
+        return;
+      }
+      exchangeCache.delete(oldest.value);
+    }
+  };
+
+  const getOrMint = (resource: string, agentId: string | undefined) => {
+    const key = exchangeCacheKey(resource, agentId);
+    const existing = exchangeCache.get(key);
     const cutoff = now() + REFRESH_SKEW_SECONDS * 1_000;
     if (existing && existing.expiresAtMs > cutoff) {
+      // Refresh insertion order so frequently-used entries survive eviction.
+      exchangeCache.delete(key);
+      exchangeCache.set(key, existing);
       return existing.promise;
     }
-    const pending = mintAccessToken(resource).then(
+    evictOldestIfNeeded();
+    const pending = mintAccessToken(resource, agentId).then(
       (token) => {
-        exchangeCache.set(resource, {
+        exchangeCache.set(key, {
           promise: Promise.resolve(token),
           expiresAtMs: token.expiresAtMs,
         });
         return token;
       },
       (err: unknown) => {
-        exchangeCache.delete(resource);
+        exchangeCache.delete(key);
         throw err;
       },
     );
-    exchangeCache.set(resource, { promise: pending, expiresAtMs: 0 });
+    exchangeCache.set(key, { promise: pending, expiresAtMs: 0 });
     return pending;
   };
 
-  const resolveResource = async (resource: string): Promise<KeycardResolveOutcome> => {
+  const resolveResource = async (
+    resource: string,
+    resolveOptions?: ResolveOptions,
+  ): Promise<KeycardResolveOutcome> => {
     const trimmed = resource.trim();
     if (!trimmed) {
       return { ok: false, reason: "no-mapping", message: "Empty Keycard resource indicator." };
     }
+    const agentId = resolveOptions?.agentId?.trim() || undefined;
     const availability = await isLocalIdentityAvailable(options.localIdentityOptions);
     if (!availability.available) {
       const reason = availability.reason === "not-darwin" ? "not-darwin" : "socket-missing";
@@ -180,7 +234,7 @@ export function createKeycardResolver(options: KeycardResolverOptions): KeycardR
       return { ok: false, reason, message };
     }
     try {
-      const token = await getOrMint(trimmed);
+      const token = await getOrMint(trimmed, agentId);
       return {
         ok: true,
         accessToken: token.accessToken,
@@ -208,6 +262,7 @@ export function createKeycardResolver(options: KeycardResolverOptions): KeycardR
       log.warn?.(`Keycard resolution for ${trimmed} failed: ${message}`, {
         resource: trimmed,
         reason,
+        agentId,
       });
       return { ok: false, reason, message };
     }
@@ -220,7 +275,7 @@ export function createKeycardResolver(options: KeycardResolverOptions): KeycardR
     config: () => identity,
     providerMappings,
     resolveResource,
-    async resolveProvider(providerId: string) {
+    async resolveProvider(providerId: string, resolveOptions?: ResolveOptions) {
       const resource = resolveKeycardResourceForProvider(identity, providerId);
       if (!resource) {
         return {
@@ -229,7 +284,7 @@ export function createKeycardResolver(options: KeycardResolverOptions): KeycardR
           message: `No Keycard resource mapping for provider "${providerId}".`,
         };
       }
-      return resolveResource(resource);
+      return resolveResource(resource, resolveOptions);
     },
     async prefetch() {
       const mappings = providerMappings();

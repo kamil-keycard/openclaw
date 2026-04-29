@@ -25,8 +25,10 @@ import { type RuntimeEnv, writeRuntimeJson } from "../runtime.js";
 import { defaultRuntime } from "../runtime.js";
 import {
   formatExecSecretRefIdValidationMessage,
+  formatKeycardSecretRefIdValidationMessage,
   isValidExecSecretRefId,
   isValidFileSecretRefId,
+  isValidKeycardSecretRefId,
   isValidSecretProviderAlias,
   secretRefKey,
   validateExecSecretRefId,
@@ -566,10 +568,10 @@ function toDotPath(path: PathSegment[]): string {
 
 function parseSecretRefSource(raw: string, label: string): SecretRefSource {
   const source = raw.trim();
-  if (source === "env" || source === "file" || source === "exec") {
+  if (source === "env" || source === "file" || source === "exec" || source === "keycard") {
     return source;
   }
-  throw new Error(`${label} must be one of: env, file, exec.`);
+  throw new Error(`${label} must be one of: env, file, exec, keycard.`);
 }
 
 function parseSecretRefBuilder(params: {
@@ -606,6 +608,9 @@ function parseSecretRefBuilder(params: {
     if (!validated.ok) {
       throw new Error(formatExecSecretRefIdValidationMessage());
     }
+  }
+  if (source === "keycard" && !isValidKeycardSecretRefId(id)) {
+    throw new Error(formatKeycardSecretRefIdValidationMessage());
   }
   return { source, provider, id };
 }
@@ -715,7 +720,7 @@ function buildProviderFromBuilder(opts: ConfigSetOptions): SecretProviderConfig 
       ...(maxBytes !== undefined ? { maxBytes } : {}),
       ...(opts.providerAllowInsecurePath ? { allowInsecurePath: true } : {}),
     };
-  } else {
+  } else if (source === "exec") {
     const command = opts.providerCommand?.trim();
     if (!command) {
       throw new Error("--provider-command is required when --provider-source exec is used.");
@@ -740,6 +745,10 @@ function buildProviderFromBuilder(opts: ConfigSetOptions): SecretProviderConfig 
       ...(opts.providerAllowInsecurePath ? { allowInsecurePath: true } : {}),
       ...(opts.providerAllowSymlinkCommand ? { allowSymlinkCommand: true } : {}),
     };
+  } else {
+    // Keycard providers carry no fields beyond `source`. Zone configuration
+    // is inherited from `gateway.identity.keycard`.
+    provider = { source: "keycard" };
   }
 
   const validated = SecretProviderSchema.safeParse(provider);

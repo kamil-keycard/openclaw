@@ -155,6 +155,23 @@ export async function runNonInteractiveLocalSetup(params: {
     nextConfig = applySkipBootstrapConfig(nextConfig);
   }
 
+  // Apply Keycard identity flags (if any) before the auth-choice flow so any
+  // provider it covers can short-circuit its API-key resolution path.
+  if (opts.keycardZoneId !== undefined) {
+    const { applyKeycardIdentityFromOptions, parseKeycardProviderFlags } =
+      await import("./local/keycard-identity.js");
+    const parseResult = parseKeycardProviderFlags(opts.keycardProvider ?? []);
+    if (parseResult.errors.length > 0) {
+      runtime.error(parseResult.errors.join("\n"));
+      runtime.exit(1);
+      return;
+    }
+    nextConfig = applyKeycardIdentityFromOptions(nextConfig, {
+      zoneId: opts.keycardZoneId,
+      providers: parseResult.providers,
+    });
+  }
+
   const inferredAuthChoice = opts.authChoice
     ? undefined
     : (await import("./local/auth-choice-inference.js")).inferAuthChoiceFromFlags(opts, {

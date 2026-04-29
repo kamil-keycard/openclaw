@@ -189,11 +189,12 @@ export function createGatewayAuxHandlers(params: {
         }
       }),
     log: params.log,
-    resolveSecrets: async ({ commandName, targetIds }) => {
+    resolveSecrets: async ({ commandName, targetIds, agentId }) => {
       const { assignments, diagnostics, inactiveRefPaths } =
         resolveCommandSecretsFromActiveRuntimeSnapshot({
           commandName,
           targetIds: new Set(targetIds),
+          ...(agentId !== undefined ? { agentId } : {}),
         });
       if (assignments.length === 0) {
         return { assignments: [] as CommandSecretAssignment[], diagnostics, inactiveRefPaths };

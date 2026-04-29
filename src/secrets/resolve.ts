@@ -9,6 +9,7 @@ import type {
   SecretRef,
   SecretRefSource,
 } from "../config/types.secrets.js";
+import { getActiveKeycardResolver } from "../identity/keycard/registry.js";
 import { formatErrorMessage } from "../infra/errors.js";
 import { inspectPathPermissions, safeStat } from "../security/audit-fs.js";
 import { isPathInside } from "../security/scan-paths.js";
@@ -18,6 +19,7 @@ import { readJsonPointer } from "./json-pointer.js";
 import {
   formatExecSecretRefIdValidationMessage,
   isValidExecSecretRefId,
+  isValidKeycardSecretRefId,
   SINGLE_VALUE_FILE_REF_ID,
   resolveDefaultSecretProviderAlias,
   secretRefKey,
@@ -37,10 +39,18 @@ const WINDOWS_UNC_PATH_PATTERN = /^\\\\[^\\]+\\[^\\]+/;
 
 export type { SecretRefResolveCache } from "./resolve-types.js";
 
-type ResolveSecretRefOptions = {
+export type ResolveSecretRefOptions = {
   config: OpenClawConfig;
   env?: NodeJS.ProcessEnv;
   cache?: SecretRefResolveCache;
+  /**
+   * Optional agent id. When set, `keycard:*` refs mint a JWT with an
+   * `agent_id` claim equal to this value before exchanging it with the
+   * Keycard zone, scoping the resulting access token to this agent. Other
+   * sources (env/file/exec) ignore this field — they read the global
+   * gateway-shared secrets configuration.
+   */
+  agentId?: string;
 };
 
 type ResolutionLimits = {
@@ -779,6 +789,57 @@ async function resolveExecRefs(params: {
   return resolved;
 }
 
+async function resolveKeycardRefs(params: {
+  refs: SecretRef[];
+  providerName: string;
+  agentId: string | undefined;
+}): Promise<ProviderResolutionOutput> {
+  const resolver = getActiveKeycardResolver();
+  if (!resolver) {
+    throw providerResolutionError({
+      source: "keycard",
+      provider: params.providerName,
+      message: `Keycard resolver is not active. Configure gateway.identity.keycard.zoneId before using "${params.providerName}".`,
+    });
+  }
+  const resolved = new Map<string, unknown>();
+  // Keep this loop sequential. The KeycardResolver already coalesces concurrent
+  // requests for the same (resource, agentId) and bounds the in-process cache;
+  // fanning out N parallel resource fetches per call would defeat that.
+  for (const ref of params.refs) {
+    const resource = ref.id.trim();
+    if (!resource) {
+      throw refResolutionError({
+        source: "keycard",
+        provider: params.providerName,
+        refId: ref.id,
+        message: "Keycard secret reference id (resource indicator) is empty.",
+      });
+    }
+    if (!isValidKeycardSecretRefId(resource)) {
+      throw refResolutionError({
+        source: "keycard",
+        provider: params.providerName,
+        refId: ref.id,
+        message: `Keycard secret reference id "${resource}" must be a URN, https URL, or SPIFFE id.`,
+      });
+    }
+    const outcome = await resolver.resolveResource(resource, {
+      ...(params.agentId !== undefined ? { agentId: params.agentId } : {}),
+    });
+    if (!outcome.ok) {
+      throw refResolutionError({
+        source: "keycard",
+        provider: params.providerName,
+        refId: ref.id,
+        message: `Keycard refused to issue an access token for "${resource}" (reason: ${outcome.reason}): ${outcome.message}`,
+      });
+    }
+    resolved.set(ref.id, outcome.accessToken);
+  }
+  return resolved;
+}
+
 async function resolveProviderRefs(params: {
   refs: SecretRef[];
   source: SecretRefSource;
@@ -811,6 +872,13 @@ async function resolveProviderRefs(params: {
         providerConfig: params.providerConfig,
         env: params.options.env ?? process.env,
         limits: params.limits,
+      });
+    }
+    if (params.providerConfig.source === "keycard") {
+      return await resolveKeycardRefs({
+        refs: params.refs,
+        providerName: params.providerName,
+        agentId: params.options.agentId?.trim() || undefined,
       });
     }
     throw providerResolutionError({

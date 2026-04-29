@@ -205,6 +205,135 @@ describe("createKeycardResolver", () => {
     }
   });
 
+  it("caches independently per (resource, agentId) and forwards --agent", async () => {
+    if (!isMacOs) {
+      return;
+    }
+    resetDiscoveryCacheForTests();
+    const fakeSocket = path.join(os.tmpdir(), "openclaw-resolver-agent-cache");
+    await fs.writeFile(fakeSocket, "");
+    const exp = Math.floor(Date.now() / 1_000) + 3_600;
+    const jwt = encodeJwt({ sub: "user-flow", aud: "https://zone-a.keycard.cloud", exp });
+    const exchangedAgents: (string | null)[] = [];
+    const fetchImpl = makeFetchResponder((url, init) => {
+      if (url.endsWith("/.well-known/oauth-authorization-server")) {
+        return new Response(
+          JSON.stringify({
+            issuer: "https://zone-a.keycard.cloud",
+            token_endpoint: "https://zone-a.keycard.cloud/oauth/2/token",
+          }),
+          { status: 200 },
+        );
+      }
+      if (url === "https://zone-a.keycard.cloud/oauth/2/token") {
+        const params = new URLSearchParams(String(init.body ?? ""));
+        const resource = params.get("resource") ?? "";
+        const idx = exchangedAgents.length;
+        exchangedAgents.push(idx === 0 ? null : idx === 1 ? "researcher" : "coder");
+        return new Response(
+          JSON.stringify({ access_token: `token-${resource}-${idx}`, expires_in: 3_600 }),
+          { status: 200 },
+        );
+      }
+      return new Response("not found", { status: 404 });
+    });
+    try {
+      await withFakeBinary(jwt, async (binaryPath) => {
+        const resolver = createKeycardResolver({
+          identity: { zoneId: "zone-a" },
+          fetchImpl,
+          localIdentityOptions: { binaryPath, socketPath: fakeSocket },
+        });
+        const gateway = await resolver.resolveResource("urn:secret:claude-api");
+        const researcher = await resolver.resolveResource("urn:secret:claude-api", {
+          agentId: "researcher",
+        });
+        const coder = await resolver.resolveResource("urn:secret:claude-api", {
+          agentId: "coder",
+        });
+        // Repeat lookups stay cached.
+        const gatewayHit = await resolver.resolveResource("urn:secret:claude-api");
+        const researcherHit = await resolver.resolveResource("urn:secret:claude-api", {
+          agentId: "researcher",
+        });
+        expect(gateway.ok && researcher.ok && coder.ok).toBe(true);
+        if (gateway.ok && researcher.ok && coder.ok) {
+          expect(gateway.accessToken).not.toBe(researcher.accessToken);
+          expect(researcher.accessToken).not.toBe(coder.accessToken);
+        }
+        if (gatewayHit.ok && researcherHit.ok && gateway.ok && researcher.ok) {
+          expect(gatewayHit.accessToken).toBe(gateway.accessToken);
+          expect(researcherHit.accessToken).toBe(researcher.accessToken);
+        }
+        // Three distinct exchange calls (one per agent slot).
+        expect(exchangedAgents.length).toBe(3);
+      });
+    } finally {
+      await fs.rm(fakeSocket, { force: true });
+    }
+  });
+
+  it("evicts oldest cache entry once exchangeCacheMaxEntries is exceeded", async () => {
+    if (!isMacOs) {
+      return;
+    }
+    resetDiscoveryCacheForTests();
+    const fakeSocket = path.join(os.tmpdir(), "openclaw-resolver-evict");
+    await fs.writeFile(fakeSocket, "");
+    const exp = Math.floor(Date.now() / 1_000) + 3_600;
+    const jwt = encodeJwt({ sub: "user-flow", exp });
+    let exchangeCalls = 0;
+    const fetchImpl = makeFetchResponder((url) => {
+      if (url.endsWith("/.well-known/oauth-authorization-server")) {
+        return new Response(
+          JSON.stringify({
+            issuer: "https://zone-evict.keycard.cloud",
+            token_endpoint: "https://zone-evict.keycard.cloud/oauth/2/token",
+          }),
+          { status: 200 },
+        );
+      }
+      if (url === "https://zone-evict.keycard.cloud/oauth/2/token") {
+        exchangeCalls += 1;
+        return new Response(
+          JSON.stringify({ access_token: `token-${exchangeCalls}`, expires_in: 3_600 }),
+          { status: 200 },
+        );
+      }
+      return new Response("not found", { status: 404 });
+    });
+    try {
+      await withFakeBinary(jwt, async (binaryPath) => {
+        const resolver = createKeycardResolver({
+          identity: { zoneId: "zone-evict" },
+          fetchImpl,
+          localIdentityOptions: { binaryPath, socketPath: fakeSocket },
+          exchangeCacheMaxEntries: 2,
+        });
+        // Three distinct agents fill and evict the LRU window.
+        const a = await resolver.resolveResource("urn:secret:r1", { agentId: "a" });
+        const b = await resolver.resolveResource("urn:secret:r1", { agentId: "b" });
+        const c = await resolver.resolveResource("urn:secret:r1", { agentId: "c" });
+        expect(a.ok && b.ok && c.ok).toBe(true);
+        expect(exchangeCalls).toBe(3);
+        // Agent "a" should have been evicted; re-resolving forces a fresh exchange.
+        const aAgain = await resolver.resolveResource("urn:secret:r1", { agentId: "a" });
+        if (a.ok && aAgain.ok) {
+          expect(aAgain.accessToken).not.toBe(a.accessToken);
+        }
+        expect(exchangeCalls).toBe(4);
+        // Agent "c" stays cached (most-recent).
+        const cAgain = await resolver.resolveResource("urn:secret:r1", { agentId: "c" });
+        if (c.ok && cAgain.ok) {
+          expect(cAgain.accessToken).toBe(c.accessToken);
+        }
+        expect(exchangeCalls).toBe(4);
+      });
+    } finally {
+      await fs.rm(fakeSocket, { force: true });
+    }
+  });
+
   it("prefetches every configured resource", async () => {
     if (!isMacOs) {
       return;

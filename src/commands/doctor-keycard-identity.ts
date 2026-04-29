@@ -30,7 +30,21 @@ export type KeycardIdentityDoctorOptions = {
   socketExists?: (socketPath: string) => boolean;
   /** Inject a discovery probe for tests. */
   discoverMetadata?: (zoneId: string) => Promise<{ token_endpoint: string }>;
+  /**
+   * Inject a per-agent-claim probe for tests. When called the implementation
+   * should return `{ supported: true }` if the daemon minted a token whose
+   * payload included `agent_id: <agentId>`, or `{ supported: false, reason }`
+   * otherwise. Defaults to a no-op that reports support as unknown.
+   */
+  probeAgentClaim?: (agentId: string) => Promise<KeycardAgentClaimProbeResult>;
 };
+
+export type KeycardAgentClaimProbeResult =
+  | { supported: true }
+  | { supported: false; reason: string }
+  | { supported: "unknown"; reason: string };
+
+const PROBE_AGENT_ID = "openclaw-doctor-probe";
 
 export type KeycardIdentityDoctorResult = {
   /** Whether `gateway.identity.keycard` is configured (after which we report). */
@@ -143,6 +157,36 @@ export async function runKeycardIdentityDoctor(
           "Token exchanges will fail until the zone is reachable.",
         ].join("\n"),
       );
+    }
+
+    if (options.probeAgentClaim) {
+      try {
+        const probe = await options.probeAgentClaim(PROBE_AGENT_ID);
+        if (probe.supported === true) {
+          result.infos.push(
+            `Daemon supports per-agent claims (verified with agent_id="${PROBE_AGENT_ID}").`,
+          );
+        } else if (probe.supported === false) {
+          result.warnings.push(
+            [
+              `Keycard daemon does not honor the --agent <id> flag (${probe.reason}).`,
+              "Per-agent keycard secret refs will fall back to the gateway-shared identity until the daemon is updated.",
+            ].join("\n"),
+          );
+        } else {
+          result.infos.push(
+            `Per-agent claim probe inconclusive (${probe.reason}); manual verification recommended.`,
+          );
+        }
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        result.warnings.push(
+          [
+            `Per-agent claim probe failed: ${msg}.`,
+            "Run `openclaw doctor --deep` again once the daemon is reachable, or rerun without keycard-scoped agent secrets.",
+          ].join("\n"),
+        );
+      }
     }
   }
 

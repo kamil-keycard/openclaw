@@ -3,6 +3,7 @@ import { ENV_SECRET_REF_ID_RE } from "../../../config/types.secrets.js";
 import {
   EXEC_SECRET_REF_ID_JSON_SCHEMA_PATTERN,
   FILE_SECRET_REF_ID_PATTERN,
+  KEYCARD_SECRET_REF_ID_JSON_SCHEMA_PATTERN,
   SECRET_PROVIDER_ALIAS_PATTERN,
 } from "../../../secrets/ref-contract.js";
 import { INPUT_PROVENANCE_KIND_VALUES } from "../../../sessions/input-provenance.js";
@@ -38,6 +39,7 @@ export const SecretRefSourceSchema = Type.Union([
   Type.Literal("env"),
   Type.Literal("file"),
   Type.Literal("exec"),
+  Type.Literal("keycard"),
 ]);
 
 const SecretProviderAliasString = Type.String({
@@ -71,10 +73,20 @@ const ExecSecretRefSchema = Type.Object(
   { additionalProperties: false },
 );
 
+const KeycardSecretRefSchema = Type.Object(
+  {
+    source: Type.Literal("keycard"),
+    provider: SecretProviderAliasString,
+    id: Type.String({ pattern: KEYCARD_SECRET_REF_ID_JSON_SCHEMA_PATTERN }),
+  },
+  { additionalProperties: false },
+);
+
 export const SecretRefSchema = Type.Union([
   EnvSecretRefSchema,
   FileSecretRefSchema,
   ExecSecretRefSchema,
+  KeycardSecretRefSchema,
 ]);
 
 export const SecretInputSchema = Type.Union([Type.String(), SecretRefSchema]);

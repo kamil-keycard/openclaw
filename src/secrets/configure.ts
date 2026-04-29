@@ -28,7 +28,9 @@ import type { SecretsApplyPlan } from "./plan.js";
 import { getProviderEnvVars } from "./provider-env-vars.js";
 import {
   formatExecSecretRefIdValidationMessage,
+  formatKeycardSecretRefIdValidationMessage,
   isValidExecSecretRefId,
+  isValidKeycardSecretRefId,
   isValidSecretProviderAlias,
   resolveDefaultSecretProviderAlias,
 } from "./ref-contract.js";
@@ -137,7 +139,10 @@ function providerHint(provider: SecretProviderConfig): string {
   if (provider.source === "file") {
     return `file (${provider.mode ?? "json"})`;
   }
-  return `exec (${provider.jsonOnly === false ? "json+text" : "json"})`;
+  if (provider.source === "exec") {
+    return `exec (${provider.jsonOnly === false ? "json+text" : "json"})`;
+  }
+  return "keycard";
 }
 
 function toSourceChoices(config: OpenClawConfig): Array<{ value: SecretRefSource; label: string }> {
@@ -154,6 +159,9 @@ function toSourceChoices(config: OpenClawConfig): Array<{ value: SecretRefSource
   }
   if (hasSource("exec")) {
     choices.push({ value: "exec", label: "exec" });
+  }
+  if (hasSource("keycard")) {
+    choices.push({ value: "keycard", label: "keycard" });
   }
   return choices;
 }
@@ -382,6 +390,7 @@ async function promptProviderSource(initial?: SecretRefSource): Promise<SecretRe
         { value: "env", label: "env" },
         { value: "file", label: "file" },
         { value: "exec", label: "exec" },
+        { value: "keycard", label: "keycard" },
       ],
       initialValue: initial,
     }),
@@ -615,7 +624,12 @@ async function promptProviderConfig(
   if (source === "file") {
     return await promptFileProvider(current?.source === "file" ? current : undefined);
   }
-  return await promptExecProvider(current?.source === "exec" ? current : undefined);
+  if (source === "exec") {
+    return await promptExecProvider(current?.source === "exec" ? current : undefined);
+  }
+  // keycard providers carry no fields beyond `source`; they inherit zone
+  // configuration from `gateway.identity.keycard`.
+  return { source: "keycard" };
 }
 
 async function configureProvidersInteractive(config: OpenClawConfig): Promise<void> {
@@ -629,7 +643,7 @@ async function configureProvidersInteractive(config: OpenClawConfig): Promise<vo
       {
         value: "add",
         label: "Add provider",
-        hint: "Define a new env/file/exec provider",
+        hint: "Define a new env/file/exec/keycard provider",
       },
     ];
     if (providerEntries.length > 0) {
@@ -915,6 +929,9 @@ export async function runSecretsConfigureInteractive(
             }
             if (source === "exec" && !isValidExecSecretRefId(trimmed)) {
               return formatExecSecretRefIdValidationMessage();
+            }
+            if (source === "keycard" && !isValidKeycardSecretRefId(trimmed)) {
+              return formatKeycardSecretRefIdValidationMessage();
             }
             return undefined;
           },

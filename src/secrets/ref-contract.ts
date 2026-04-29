@@ -7,11 +7,20 @@ import {
 const FILE_SECRET_REF_SEGMENT_PATTERN = /^(?:[^~]|~0|~1)*$/;
 export const SECRET_PROVIDER_ALIAS_PATTERN = /^[a-z][a-z0-9_-]{0,63}$/;
 const EXEC_SECRET_REF_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,255}$/;
+/**
+ * Permissive pattern for Keycard ref ids. The id is forwarded as the RFC 8707
+ * resource indicator (URN like `urn:secret:claude-api`, https URL, or SPIFFE
+ * id like `spiffe://openclaw/agent/coder`). Disallows control chars, spaces,
+ * and the JSON-pointer escape characters; capped at 512 chars.
+ */
+const KEYCARD_SECRET_REF_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:/?#@%+=&,;~!*'()-]{0,511}$/;
 
 export const SINGLE_VALUE_FILE_REF_ID = "value";
 export const FILE_SECRET_REF_ID_PATTERN = /^(?:value|\/(?:[^~]|~0|~1)*(?:\/(?:[^~]|~0|~1)*)*)$/;
 export const EXEC_SECRET_REF_ID_JSON_SCHEMA_PATTERN =
   "^(?!.*(?:^|/)\\.{1,2}(?:/|$))[A-Za-z0-9][A-Za-z0-9._:/-]{0,255}$";
+export const KEYCARD_SECRET_REF_ID_JSON_SCHEMA_PATTERN =
+  "^[A-Za-z0-9][A-Za-z0-9._:/?#@%+=&,;~!*'()-]{0,511}$";
 
 export type ExecSecretRefIdValidationReason = "pattern" | "traversal-segment";
 
@@ -28,6 +37,7 @@ export type SecretRefDefaultsCarrier = {
       env?: string;
       file?: string;
       exec?: string;
+      keycard?: string;
     };
     providers?: Record<string, { source?: string }>;
   };
@@ -47,7 +57,9 @@ export function resolveDefaultSecretProviderAlias(
       ? config.secrets?.defaults?.env
       : source === "file"
         ? config.secrets?.defaults?.file
-        : config.secrets?.defaults?.exec;
+        : source === "exec"
+          ? config.secrets?.defaults?.exec
+          : config.secrets?.defaults?.keycard;
   if (configured?.trim()) {
     return configured.trim();
   }
@@ -104,5 +116,16 @@ export function formatExecSecretRefIdValidationMessage(): string {
     "Exec secret reference id must match /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,255}$/",
     'and must not include "." or ".." path segments',
     '(example: "vault/openai/api-key").',
+  ].join(" ");
+}
+
+export function isValidKeycardSecretRefId(value: string): boolean {
+  return KEYCARD_SECRET_REF_ID_PATTERN.test(value);
+}
+
+export function formatKeycardSecretRefIdValidationMessage(): string {
+  return [
+    "Keycard secret reference id must be the RFC 8707 resource indicator",
+    '(URN, https URL, or SPIFFE id; example: "urn:secret:claude-api").',
   ].join(" ");
 }

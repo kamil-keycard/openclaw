@@ -1,6 +1,6 @@
 import { isRecord } from "../utils.js";
 
-export type SecretRefSource = "env" | "file" | "exec"; // pragma: allowlist secret
+export type SecretRefSource = "env" | "file" | "exec" | "keycard"; // pragma: allowlist secret
 
 /**
  * Stable identifier for a secret in a configured source.
@@ -29,10 +29,15 @@ type SecretDefaults = {
   env?: string;
   file?: string;
   exec?: string;
+  keycard?: string;
 };
 
 export function isValidEnvSecretRefId(value: string): boolean {
   return ENV_SECRET_REF_ID_RE.test(value);
+}
+
+function isKnownSecretRefSource(value: unknown): value is SecretRefSource {
+  return value === "env" || value === "file" || value === "exec" || value === "keycard";
 }
 
 export function isSecretRef(value: unknown): value is SecretRef {
@@ -43,7 +48,7 @@ export function isSecretRef(value: unknown): value is SecretRef {
     return false;
   }
   return (
-    (value.source === "env" || value.source === "file" || value.source === "exec") &&
+    isKnownSecretRefSource(value.source) &&
     typeof value.provider === "string" &&
     value.provider.trim().length > 0 &&
     typeof value.id === "string" &&
@@ -58,7 +63,7 @@ function isLegacySecretRefWithoutProvider(
     return false;
   }
   return (
-    (value.source === "env" || value.source === "file" || value.source === "exec") &&
+    isKnownSecretRefSource(value.source) &&
     typeof value.id === "string" &&
     value.id.trim().length > 0 &&
     value.provider === undefined
@@ -115,7 +120,9 @@ export function coerceSecretRef(value: unknown, defaults?: SecretDefaults): Secr
         ? (defaults?.env ?? DEFAULT_SECRET_PROVIDER_ALIAS)
         : value.source === "file"
           ? (defaults?.file ?? DEFAULT_SECRET_PROVIDER_ALIAS)
-          : (defaults?.exec ?? DEFAULT_SECRET_PROVIDER_ALIAS);
+          : value.source === "exec"
+            ? (defaults?.exec ?? DEFAULT_SECRET_PROVIDER_ALIAS)
+            : (defaults?.keycard ?? DEFAULT_SECRET_PROVIDER_ALIAS);
     return {
       source: value.source,
       provider,
@@ -274,10 +281,22 @@ export type ExecSecretProviderConfig = {
   allowSymlinkCommand?: boolean;
 };
 
+/**
+ * Resolves secrets via the active Keycard broker (token exchange against the
+ * configured zone, JWT minted by `keycard-osx-oidc`). The provider does not
+ * carry zone configuration — it inherits `gateway.identity.keycard` — so a
+ * single instance is enough; operators only need to declare it to opt into
+ * the source. The ref `id` is forwarded as the RFC 8707 resource indicator.
+ */
+export type KeycardSecretProviderConfig = {
+  source: "keycard";
+};
+
 export type SecretProviderConfig =
   | EnvSecretProviderConfig
   | FileSecretProviderConfig
-  | ExecSecretProviderConfig;
+  | ExecSecretProviderConfig
+  | KeycardSecretProviderConfig;
 
 export type SecretsConfig = {
   providers?: Record<string, SecretProviderConfig>;
@@ -285,6 +304,7 @@ export type SecretsConfig = {
     env?: string;
     file?: string;
     exec?: string;
+    keycard?: string;
   };
   resolution?: {
     maxProviderConcurrency?: number;

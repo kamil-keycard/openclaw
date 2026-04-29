@@ -334,6 +334,60 @@ describe("createKeycardResolver", () => {
     }
   });
 
+  it("coalesces concurrent resolveResource calls into a single exchange", async () => {
+    if (!isMacOs) {
+      return;
+    }
+    resetDiscoveryCacheForTests();
+    const fakeSocket = path.join(os.tmpdir(), "openclaw-resolver-coalesce");
+    await fs.writeFile(fakeSocket, "");
+    const exp = Math.floor(Date.now() / 1_000) + 3_600;
+    const jwt = encodeJwt({ sub: "user-coalesce", exp });
+    let exchangeCalls = 0;
+    const fetchImpl = makeFetchResponder((url) => {
+      if (url.endsWith("/.well-known/oauth-authorization-server")) {
+        return new Response(
+          JSON.stringify({
+            issuer: "https://zone-coal.keycard.cloud",
+            token_endpoint: "https://zone-coal.keycard.cloud/oauth/2/token",
+          }),
+          { status: 200 },
+        );
+      }
+      if (url === "https://zone-coal.keycard.cloud/oauth/2/token") {
+        exchangeCalls += 1;
+        return new Response(
+          JSON.stringify({ access_token: `coalesced-${exchangeCalls}`, expires_in: 3_600 }),
+          { status: 200 },
+        );
+      }
+      return new Response("not found", { status: 404 });
+    });
+    try {
+      await withFakeBinary(jwt, async (binaryPath) => {
+        const resolver = createKeycardResolver({
+          identity: { zoneId: "zone-coal" },
+          fetchImpl,
+          localIdentityOptions: { binaryPath, socketPath: fakeSocket },
+        });
+        const results = await Promise.all([
+          resolver.resolveResource("urn:secret:claude-api"),
+          resolver.resolveResource("urn:secret:claude-api"),
+          resolver.resolveResource("urn:secret:claude-api"),
+        ]);
+        for (const r of results) {
+          expect(r.ok).toBe(true);
+          if (r.ok) {
+            expect(r.accessToken).toBe("coalesced-1");
+          }
+        }
+        expect(exchangeCalls).toBe(1);
+      });
+    } finally {
+      await fs.rm(fakeSocket, { force: true });
+    }
+  });
+
   it("prefetches every configured resource", async () => {
     if (!isMacOs) {
       return;

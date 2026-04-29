@@ -300,6 +300,35 @@ describe("LocalIdentityTokenCache", () => {
     }
   });
 
+  it("coalesces concurrent getToken calls into a single CLI invocation", async () => {
+    if (!isMacOs) {
+      return;
+    }
+    const exp = Math.floor(Date.now() / 1_000) + 3_600;
+    const jwt = encodeJwt({ sub: "user-coalesce", exp });
+    const fakeSocket = path.join(os.tmpdir(), "openclaw-fake-socket-cache-coalesce");
+    await fs.writeFile(fakeSocket, "");
+    try {
+      await withFakeBinary(jwt, async (fake) => {
+        const cache = new LocalIdentityTokenCache({
+          binaryPath: fake.binaryPath,
+          socketPath: fakeSocket,
+        });
+        const results = await Promise.all([
+          cache.getToken("https://example.test"),
+          cache.getToken("https://example.test"),
+          cache.getToken("https://example.test"),
+        ]);
+        for (const r of results) {
+          expect(r.token).toBe(jwt);
+        }
+        expect(await fake.callCount()).toBe(1);
+      });
+    } finally {
+      await fs.rm(fakeSocket, { force: true });
+    }
+  });
+
   it("invalidate(audience) drops every per-agent variant", async () => {
     if (!isMacOs) {
       return;

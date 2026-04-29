@@ -628,7 +628,10 @@ async function promptProviderConfig(
     return await promptExecProvider(current?.source === "exec" ? current : undefined);
   }
   // keycard providers carry no fields beyond `source`; they inherit zone
-  // configuration from `gateway.identity.keycard`.
+  // configuration from `gateway.identity.keycard`. Per-agent secrets require
+  // the keycard-osx-oidcd daemon's `--agent <id>` flag (v1); without it, the
+  // gateway-shared identity is used. Run `openclaw doctor --deep` to verify
+  // daemon support.
   return { source: "keycard" };
 }
 

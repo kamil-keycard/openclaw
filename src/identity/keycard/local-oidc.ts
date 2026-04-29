@@ -234,7 +234,7 @@ export class LocalIdentityTokenCache {
     const key = tokenCacheKey(audienceKey, normalizedAgentId);
     const existing = this.entries.get(key);
     const cutoff = this.now() + REFRESH_SKEW_MS;
-    if (existing && existing.expiresAt * 1_000 > cutoff) {
+    if (existing && (existing.expiresAt === 0 || existing.expiresAt * 1_000 > cutoff)) {
       return existing.promise;
     }
     const request: LocalIdentityRequest = {

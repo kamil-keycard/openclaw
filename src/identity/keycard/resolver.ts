@@ -36,6 +36,7 @@ const log: SubsystemLogger = createSubsystemLogger("identity/keycard/resolver");
 const REFRESH_SKEW_SECONDS = 60;
 const MIN_TOKEN_TTL_SECONDS = 30;
 const FALLBACK_TOKEN_TTL_SECONDS = 5 * 60;
+const AVAILABILITY_CACHE_TTL_MS = 30_000;
 /**
  * Soft bound on the per-resource token cache. Per-agent resolution multiplies
  * cache fanout by the active agent count, so we cap entries to keep a
@@ -132,6 +133,19 @@ export function createKeycardResolver(options: KeycardResolverOptions): KeycardR
       : DEFAULT_EXCHANGE_CACHE_MAX_ENTRIES;
   let discoveryPromise: Promise<AuthorizationServerMetadata> | undefined;
 
+  let availabilityCache:
+    | { result: Awaited<ReturnType<typeof isLocalIdentityAvailable>>; expiresAtMs: number }
+    | undefined;
+
+  const checkAvailability = async () => {
+    if (availabilityCache && availabilityCache.expiresAtMs > now()) {
+      return availabilityCache.result;
+    }
+    const result = await isLocalIdentityAvailable(options.localIdentityOptions);
+    availabilityCache = { result, expiresAtMs: now() + AVAILABILITY_CACHE_TTL_MS };
+    return result;
+  };
+
   const ensureMetadata = (): Promise<AuthorizationServerMetadata> => {
     if (discoveryPromise) {
       return discoveryPromise;
@@ -191,8 +205,7 @@ export function createKeycardResolver(options: KeycardResolverOptions): KeycardR
     const key = exchangeCacheKey(resource, agentId);
     const existing = exchangeCache.get(key);
     const cutoff = now() + REFRESH_SKEW_SECONDS * 1_000;
-    if (existing && existing.expiresAtMs > cutoff) {
-      // Refresh insertion order so frequently-used entries survive eviction.
+    if (existing && (existing.expiresAtMs === 0 || existing.expiresAtMs > cutoff)) {
       exchangeCache.delete(key);
       exchangeCache.set(key, existing);
       return existing.promise;
@@ -224,7 +237,7 @@ export function createKeycardResolver(options: KeycardResolverOptions): KeycardR
       return { ok: false, reason: "no-mapping", message: "Empty Keycard resource indicator." };
     }
     const agentId = resolveOptions?.agentId?.trim() || undefined;
-    const availability = await isLocalIdentityAvailable(options.localIdentityOptions);
+    const availability = await checkAvailability();
     if (!availability.available) {
       const reason = availability.reason === "not-darwin" ? "not-darwin" : "socket-missing";
       const message =
@@ -296,17 +309,24 @@ export function createKeycardResolver(options: KeycardResolverOptions): KeycardR
           targets.push(entry.resource);
         }
       }
-      const outcomes: { resource: string; outcome: KeycardResolveOutcome }[] = [];
-      for (const resource of targets) {
-        const outcome = await resolveResource(resource);
-        outcomes.push({ resource, outcome });
-      }
-      return outcomes;
+      const settled = await Promise.allSettled(
+        targets.map(async (resource) => ({
+          resource,
+          outcome: await resolveResource(resource),
+        })),
+      );
+      return settled
+        .filter(
+          (r): r is PromiseFulfilledResult<{ resource: string; outcome: KeycardResolveOutcome }> =>
+            r.status === "fulfilled",
+        )
+        .map((r) => r.value);
     },
     dispose() {
       exchangeCache.clear();
       localIdentityCache.invalidate();
       discoveryPromise = undefined;
+      availabilityCache = undefined;
     },
   };
 }

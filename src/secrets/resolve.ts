@@ -802,10 +802,6 @@ async function resolveKeycardRefs(params: {
       message: `Keycard resolver is not active. Configure gateway.identity.keycard.zoneId before using "${params.providerName}".`,
     });
   }
-  const resolved = new Map<string, unknown>();
-  // Keep this loop sequential. The KeycardResolver already coalesces concurrent
-  // requests for the same (resource, agentId) and bounds the in-process cache;
-  // fanning out N parallel resource fetches per call would defeat that.
   for (const ref of params.refs) {
     const resource = ref.id.trim();
     if (!resource) {
@@ -824,18 +820,29 @@ async function resolveKeycardRefs(params: {
         message: `Keycard secret reference id "${resource}" must be a URN, https URL, or SPIFFE id.`,
       });
     }
-    const outcome = await resolver.resolveResource(resource, {
-      ...(params.agentId !== undefined ? { agentId: params.agentId } : {}),
-    });
-    if (!outcome.ok) {
-      throw refResolutionError({
-        source: "keycard",
-        provider: params.providerName,
-        refId: ref.id,
-        message: `Keycard refused to issue an access token for "${resource}" (reason: ${outcome.reason}): ${outcome.message}`,
-      });
-    }
-    resolved.set(ref.id, outcome.accessToken);
+  }
+  // Fan out distinct resources in parallel. The resolver's per-resource
+  // single-flight coalescing deduplicates concurrent calls for the same
+  // (resource, agentId) pair automatically.
+  const resolveOpts = params.agentId !== undefined ? { agentId: params.agentId } : {};
+  const results = await Promise.all(
+    params.refs.map(async (ref) => {
+      const resource = ref.id.trim();
+      const outcome = await resolver.resolveResource(resource, resolveOpts);
+      if (!outcome.ok) {
+        throw refResolutionError({
+          source: "keycard",
+          provider: params.providerName,
+          refId: ref.id,
+          message: `Keycard refused to issue an access token for "${resource}" (reason: ${outcome.reason}): ${outcome.message}`,
+        });
+      }
+      return { id: ref.id, accessToken: outcome.accessToken };
+    }),
+  );
+  const resolved = new Map<string, unknown>();
+  for (const r of results) {
+    resolved.set(r.id, r.accessToken);
   }
   return resolved;
 }

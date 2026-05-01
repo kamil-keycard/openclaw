@@ -1,6 +1,6 @@
 import { isRecord } from "../utils.js";
 
-export type SecretRefSource = "env" | "file" | "exec"; // pragma: allowlist secret
+export type SecretRefSource = "env" | "file" | "exec" | "plugin"; // pragma: allowlist secret
 
 /**
  * Stable identifier for a secret in a configured source.
@@ -8,6 +8,7 @@ export type SecretRefSource = "env" | "file" | "exec"; // pragma: allowlist secr
  * - env source: provider "default", id "OPENAI_API_KEY"
  * - file source: provider "mounted-json", id "/providers/openai/apiKey"
  * - exec source: provider "vault", id "openai/api-key"
+ * - plugin source: provider "keycard", id "openai-api-key"
  */
 export type SecretRef = {
   source: SecretRefSource;
@@ -43,7 +44,10 @@ export function isSecretRef(value: unknown): value is SecretRef {
     return false;
   }
   return (
-    (value.source === "env" || value.source === "file" || value.source === "exec") &&
+    (value.source === "env" ||
+      value.source === "file" ||
+      value.source === "exec" ||
+      value.source === "plugin") &&
     typeof value.provider === "string" &&
     value.provider.trim().length > 0 &&
     typeof value.id === "string" &&
@@ -58,7 +62,10 @@ function isLegacySecretRefWithoutProvider(
     return false;
   }
   return (
-    (value.source === "env" || value.source === "file" || value.source === "exec") &&
+    (value.source === "env" ||
+      value.source === "file" ||
+      value.source === "exec" ||
+      value.source === "plugin") &&
     typeof value.id === "string" &&
     value.id.trim().length > 0 &&
     value.provider === undefined
@@ -115,7 +122,9 @@ export function coerceSecretRef(value: unknown, defaults?: SecretDefaults): Secr
         ? (defaults?.env ?? DEFAULT_SECRET_PROVIDER_ALIAS)
         : value.source === "file"
           ? (defaults?.file ?? DEFAULT_SECRET_PROVIDER_ALIAS)
-          : (defaults?.exec ?? DEFAULT_SECRET_PROVIDER_ALIAS);
+          : value.source === "exec"
+            ? (defaults?.exec ?? DEFAULT_SECRET_PROVIDER_ALIAS)
+            : DEFAULT_SECRET_PROVIDER_ALIAS;
     return {
       source: value.source,
       provider,
@@ -274,10 +283,25 @@ export type ExecSecretProviderConfig = {
   allowSymlinkCommand?: boolean;
 };
 
+/**
+ * Open envelope for `secrets.providers.<alias>` entries that delegate
+ * resolution to a plugin-registered SecretSource. Core only validates the
+ * envelope shape; the named plugin's Zod schema validates the rest of the
+ * payload.
+ */
+export type PluginSecretProviderConfig = {
+  source: "plugin";
+  /** Name of the registered SecretSourceFactory (matches `api.registerSecretSource({ name })`). */
+  plugin: string;
+  /** Plugin-owned payload — opaque to core. */
+  [k: string]: unknown;
+};
+
 export type SecretProviderConfig =
   | EnvSecretProviderConfig
   | FileSecretProviderConfig
-  | ExecSecretProviderConfig;
+  | ExecSecretProviderConfig
+  | PluginSecretProviderConfig;
 
 export type SecretsConfig = {
   providers?: Record<string, SecretProviderConfig>;

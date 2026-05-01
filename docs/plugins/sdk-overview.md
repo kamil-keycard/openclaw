@@ -94,6 +94,21 @@ methods:
 | `api.registerTool(tool, opts?)` | Agent tool (required or `{ optional: true }`) |
 | `api.registerCommand(def)`      | Custom command (bypasses the LLM)             |
 
+### Secret sources
+
+| Method                              | What it registers                                                     |
+| ----------------------------------- | --------------------------------------------------------------------- |
+| `api.registerSecretSource(factory)` | A pluggable resolver for `secrets.providers.<alias>.source: "plugin"` |
+
+Plugins that implement an external secret issuer (e.g. workload identity, KMS,
+short-lived token broker) register a `SecretSourceFactory`. Operators bind the
+factory to one or more aliases under `secrets.providers.<alias>` with
+`source: "plugin"` and `plugin: "<factory-name>"`; references then use the
+existing `{ source: "plugin", provider: "<alias>", id: "<key>" }` `SecretRef`
+shape and flow through every secret-shaped slot. See the
+[`openclaw/plugin-sdk/secret-source`](/plugins/sdk-entrypoints#openclaw-plugin-sdk-secret-source)
+reference for the exact contract.
+
 Plugin commands can set `agentPromptGuidance` when the agent needs a short,
 command-owned routing hint. Keep that text about the command itself; do not add
 provider- or plugin-specific policy to core prompt builders.

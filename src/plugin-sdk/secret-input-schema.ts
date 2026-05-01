@@ -50,6 +50,11 @@ const secretInputSchema = z
         provider: providerSchema,
         id: z.string().refine(isValidExecSecretRefId, formatExecSecretRefIdValidationMessage()),
       }),
+      z.object({
+        source: z.literal("plugin"),
+        provider: providerSchema,
+        id: z.string().min(1).max(256),
+      }),
     ]),
   ])
   .register(sensitive);

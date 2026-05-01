@@ -23,6 +23,7 @@ import {
   NODE_SYSTEM_NOTIFY_COMMAND,
   NODE_SYSTEM_RUN_COMMANDS,
 } from "../infra/node-commands.js";
+import { registerSecretSourceFactory } from "../secrets/source-plugin-registry.js";
 import { normalizePluginGatewayMethodScope } from "../shared/gateway-method-policy.js";
 import { resolveGlobalSingleton } from "../shared/global-singleton.js";
 import { normalizeOptionalString } from "../shared/string-coerce.js";
@@ -1573,6 +1574,22 @@ export function createPluginRegistry(registryParams: PluginRegistryParams) {
               },
               registerCodexAppServerExtensionFactory: (factory) => {
                 registerCodexAppServerExtensionFactory(record, factory);
+              },
+              registerSecretSource: (factory) => {
+                const result = registerSecretSourceFactory(factory, {
+                  ownerPluginId: record.id,
+                });
+                if (!result.ok) {
+                  const ownerDetail = result.existingOwner
+                    ? ` (owner: ${result.existingOwner})`
+                    : "";
+                  pushDiagnostic({
+                    level: "error",
+                    pluginId: record.id,
+                    source: record.source,
+                    message: `secret source already registered: ${factory.name}${ownerDetail}`,
+                  });
+                }
               },
               registerAgentToolResultMiddleware: (handler, options) => {
                 registerAgentToolResultMiddleware(record, handler, options);

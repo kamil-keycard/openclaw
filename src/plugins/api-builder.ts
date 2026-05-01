@@ -60,6 +60,7 @@ export type BuildPluginApiParams = {
       | "registerMemoryFlushPlan"
       | "registerMemoryRuntime"
       | "registerMemoryEmbeddingProvider"
+      | "registerSecretSource"
       | "on"
     >
   >;
@@ -121,6 +122,7 @@ const noopRegisterMemoryFlushPlan: OpenClawPluginApi["registerMemoryFlushPlan"] 
 const noopRegisterMemoryRuntime: OpenClawPluginApi["registerMemoryRuntime"] = () => {};
 const noopRegisterMemoryEmbeddingProvider: OpenClawPluginApi["registerMemoryEmbeddingProvider"] =
   () => {};
+const noopRegisterSecretSource: OpenClawPluginApi["registerSecretSource"] = () => {};
 const noopOn: OpenClawPluginApi["on"] = () => {};
 
 export function buildPluginApi(params: BuildPluginApiParams): OpenClawPluginApi {
@@ -197,6 +199,7 @@ export function buildPluginApi(params: BuildPluginApiParams): OpenClawPluginApi 
     registerMemoryRuntime: handlers.registerMemoryRuntime ?? noopRegisterMemoryRuntime,
     registerMemoryEmbeddingProvider:
       handlers.registerMemoryEmbeddingProvider ?? noopRegisterMemoryEmbeddingProvider,
+    registerSecretSource: handlers.registerSecretSource ?? noopRegisterSecretSource,
     resolvePath: params.resolvePath,
     on: handlers.on ?? noopOn,
   };

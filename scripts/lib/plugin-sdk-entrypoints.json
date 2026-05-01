@@ -291,6 +291,7 @@
   "provider-zai-endpoint",
   "secret-input",
   "secret-input-runtime",
+  "secret-source",
   "channel-status",
   "status-helpers",
   "speech",

@@ -167,6 +167,40 @@ Define providers under `secrets.providers`:
     - Path must pass ownership/permission checks.
     - Windows fail-closed note: if ACL verification is unavailable for a path, resolution fails. For trusted paths only, set `allowInsecurePath: true` on that provider to bypass path security checks.
   </Accordion>
+  <Accordion title="Plugin provider">
+    - Delegates resolution to a plugin-registered SecretSource (e.g. workload-identity brokers, KMS façades, custom issuers).
+    - The named plugin must call `api.registerSecretSource(...)` (see [Plugin SDK secret sources](/plugins/sdk-entrypoints#openclaw-plugin-sdk-secret-source)).
+    - Core only validates the envelope (`source: "plugin"`, `plugin: "<factory-name>"`); the plugin's Zod schema validates the rest of the alias entry.
+    - Plugin sources may return a per-value `expiresAt`. The runtime caches the value and refreshes lazily through the same source on next access if the cached value is within the TTL leeway of expiry (default 60s).
+    - Aliases referencing an unregistered plugin emit a warn diagnostic and skip binding; references resolve as a tagged provider error at request time.
+
+    Example (operator config):
+
+    ```json5
+    {
+      secrets: {
+        providers: {
+          keycard: {
+            source: "plugin",
+            plugin: "keycard-identity",
+            // remaining fields are validated by the keycard plugin
+            issuer: "https://keycard.example.com",
+            resources: {
+              "openai-api-key": { resource: "https://api.openai.com" },
+            },
+          },
+        },
+      },
+    }
+    ```
+
+    Reference shape (unchanged):
+
+    ```json5
+    { source: "plugin", provider: "keycard", id: "openai-api-key" }
+    ```
+
+  </Accordion>
   <Accordion title="Exec provider">
     - Runs configured absolute binary path, no shell.
     - By default, `command` must point to a regular file (not a symlink).

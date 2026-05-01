@@ -38,6 +38,7 @@ export const SecretRefSourceSchema = Type.Union([
   Type.Literal("env"),
   Type.Literal("file"),
   Type.Literal("exec"),
+  Type.Literal("plugin"),
 ]);
 
 const SecretProviderAliasString = Type.String({
@@ -71,10 +72,21 @@ const ExecSecretRefSchema = Type.Object(
   { additionalProperties: false },
 );
 
+// Plugin SecretRef ids are plugin-defined; the wire schema bounds length only.
+const PluginSecretRefSchema = Type.Object(
+  {
+    source: Type.Literal("plugin"),
+    provider: SecretProviderAliasString,
+    id: Type.String({ minLength: 1, maxLength: 256 }),
+  },
+  { additionalProperties: false },
+);
+
 export const SecretRefSchema = Type.Union([
   EnvSecretRefSchema,
   FileSecretRefSchema,
   ExecSecretRefSchema,
+  PluginSecretRefSchema,
 ]);
 
 export const SecretInputSchema = Type.Union([Type.String(), SecretRefSchema]);

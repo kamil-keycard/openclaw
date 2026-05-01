@@ -5,6 +5,7 @@ import type { OpenClawConfig } from "../config/types.openclaw.js";
 import type {
   ExecSecretProviderConfig,
   FileSecretProviderConfig,
+  PluginSecretProviderConfig,
   SecretProviderConfig,
   SecretRef,
   SecretRefSource,
@@ -22,8 +23,10 @@ import {
   resolveDefaultSecretProviderAlias,
   secretRefKey,
 } from "./ref-contract.js";
-import type { SecretRefResolveCache } from "./resolve-types.js";
+import type { PluginSecretRefMeta, SecretRefResolveCache } from "./resolve-types.js";
 import { isNonEmptyString, isRecord, normalizePositiveInt } from "./shared.js";
+import { resolveSecretSourceAlias } from "./source-plugin-registry.js";
+import type { SecretSourceOutcome } from "./source-plugin.js";
 
 const DEFAULT_PROVIDER_CONCURRENCY = 4;
 const DEFAULT_MAX_REFS_PER_PROVIDER = 512;
@@ -645,6 +648,95 @@ function parseExecValues(params: {
   return out;
 }
 
+async function resolvePluginRefs(params: {
+  refs: SecretRef[];
+  providerName: string;
+  providerConfig: PluginSecretProviderConfig;
+  cache?: SecretRefResolveCache;
+}): Promise<ProviderResolutionOutput> {
+  const lookup = resolveSecretSourceAlias(params.providerName);
+  if (!lookup.ok) {
+    throw providerResolutionError({
+      source: "plugin",
+      provider: params.providerName,
+      message: `Secret provider "${params.providerName}" references plugin "${params.providerConfig.plugin}" but no plugin secret source is bound. Install/enable the plugin or remove the alias.`,
+    });
+  }
+
+  const ids = params.refs.map((ref) => ref.id);
+  let outcomes: ReadonlyArray<SecretSourceOutcome>;
+  try {
+    outcomes = await lookup.source.resolve(ids.map((id) => ({ id })));
+  } catch (err) {
+    throwUnknownProviderResolutionError({
+      source: "plugin",
+      provider: params.providerName,
+      err,
+    });
+  }
+  if (outcomes.length !== ids.length) {
+    throw providerResolutionError({
+      source: "plugin",
+      provider: params.providerName,
+      message: `Plugin secret source "${lookup.source.name}" returned ${outcomes.length} outcomes for ${ids.length} requested ids.`,
+    });
+  }
+
+  const resolved = new Map<string, unknown>();
+  const meta: Array<[string, PluginSecretRefMeta]> = [];
+  const resolvedAt = Date.now();
+  for (let index = 0; index < ids.length; index++) {
+    const id = ids[index];
+    const outcome = outcomes[index];
+    if (outcome.ok) {
+      if (typeof outcome.value !== "string") {
+        throw refResolutionError({
+          source: "plugin",
+          provider: params.providerName,
+          refId: id,
+          message: `Plugin secret source "${lookup.source.name}" returned a non-string value for id "${id}".`,
+        });
+      }
+      resolved.set(id, outcome.value);
+      const refKey = secretRefKey({
+        source: "plugin",
+        provider: params.providerName,
+        id,
+      });
+      meta.push([
+        refKey,
+        {
+          ...(typeof outcome.expiresAt === "number" ? { expiresAt: outcome.expiresAt } : {}),
+          resolvedAt,
+        },
+      ]);
+      continue;
+    }
+    if (outcome.reason === "not-found") {
+      throw refResolutionError({
+        source: "plugin",
+        provider: params.providerName,
+        refId: id,
+        message: `Plugin secret source "${lookup.source.name}" did not find id "${id}": ${outcome.message}`,
+      });
+    }
+    throw providerResolutionError({
+      source: "plugin",
+      provider: params.providerName,
+      message: `Plugin secret source "${lookup.source.name}" reported ${outcome.reason} for id "${id}": ${outcome.message}`,
+    });
+  }
+
+  if (params.cache && meta.length > 0) {
+    params.cache.pluginRefMetaByRefKey ??= new Map();
+    for (const [refKey, entry] of meta) {
+      params.cache.pluginRefMetaByRefKey.set(refKey, entry);
+    }
+  }
+
+  return resolved;
+}
+
 async function resolveExecRefs(params: {
   refs: SecretRef[];
   providerName: string;
@@ -813,6 +905,14 @@ async function resolveProviderRefs(params: {
         limits: params.limits,
       });
     }
+    if (params.providerConfig.source === "plugin") {
+      return await resolvePluginRefs({
+        refs: params.refs,
+        providerName: params.providerName,
+        providerConfig: params.providerConfig,
+        cache: params.options.cache,
+      });
+    }
     throw providerResolutionError({
       source: params.source,
       provider: params.providerName,
@@ -947,6 +1047,60 @@ export async function resolveSecretRefString(
   options: ResolveSecretRefOptions,
 ): Promise<string> {
   const resolved = await resolveSecretRefValue(ref, options);
+  if (!isNonEmptyString(resolved)) {
+    throw new Error(
+      `Secret reference "${ref.source}:${ref.provider}:${ref.id}" resolved to a non-string or empty value.`,
+    );
+  }
+  return resolved;
+}
+
+/**
+ * Default TTL leeway for plugin-sourced secrets — values are considered stale
+ * `leewayMs` before their reported `expiresAt`. Bridges clock skew and fetch
+ * latency so a single-flight refresh starts before the value is actually expired.
+ */
+export const DEFAULT_PLUGIN_SECRET_TTL_LEEWAY_MS = 60_000;
+
+export type RefreshSecretRefOptions = ResolveSecretRefOptions & {
+  /** Override the staleness leeway (ms before `expiresAt`). */
+  leewayMs?: number;
+  /** Override the wall clock for tests. */
+  now?: () => number;
+};
+
+/**
+ * Resolve a `SecretRef` value, refreshing through the plugin source when the
+ * cached value's `expiresAt` is within `leewayMs` of now. For non-plugin refs
+ * (`env` / `file` / `exec`) this is identical to `resolveSecretRefValue`.
+ *
+ * Single-flight is preserved via the existing `cache.resolvedByRefKey` map:
+ * stale entries are evicted before the new resolution promise is installed.
+ */
+export async function resolveSecretRefValueWithRefresh(
+  ref: SecretRef,
+  options: RefreshSecretRefOptions,
+): Promise<unknown> {
+  const cache = options.cache;
+  if (!cache || ref.source !== "plugin") {
+    return await resolveSecretRefValue(ref, options);
+  }
+  const now = (options.now ?? Date.now)();
+  const leewayMs = options.leewayMs ?? DEFAULT_PLUGIN_SECRET_TTL_LEEWAY_MS;
+  const key = secretRefKey(ref);
+  const meta = cache.pluginRefMetaByRefKey?.get(key);
+  if (meta && typeof meta.expiresAt === "number" && now >= meta.expiresAt - leewayMs) {
+    cache.resolvedByRefKey?.delete(key);
+    cache.pluginRefMetaByRefKey?.delete(key);
+  }
+  return await resolveSecretRefValue(ref, options);
+}
+
+export async function resolveSecretRefStringWithRefresh(
+  ref: SecretRef,
+  options: RefreshSecretRefOptions,
+): Promise<string> {
+  const resolved = await resolveSecretRefValueWithRefresh(ref, options);
   if (!isNonEmptyString(resolved)) {
     throw new Error(
       `Secret reference "${ref.source}:${ref.provider}:${ref.id}" resolved to a non-string or empty value.`,

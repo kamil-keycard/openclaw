@@ -74,6 +74,9 @@ export const pluginSdkDocMetadata = {
   "secret-input": {
     category: "channel",
   },
+  "secret-source": {
+    category: "core",
+  },
   "webhook-ingress": {
     category: "channel",
   },

@@ -2329,6 +2329,14 @@ export type OpenClawPluginApi = {
   registerMemoryEmbeddingProvider: (
     adapter: import("./memory-embedding-providers.js").MemoryEmbeddingProviderAdapter,
   ) => void;
+  /**
+   * Register a plugin-secret-source factory. The factory's `name` is what
+   * operators put in `secrets.providers.<alias>.plugin`; the factory's
+   * `configSchema` validates the rest of that alias entry.
+   */
+  registerSecretSource: (
+    factory: import("../secrets/source-plugin.js").SecretSourceFactory,
+  ) => void;
   resolvePath: (input: string) => string;
   /** Register a lifecycle hook handler */
   on: <K extends PluginHookName>(

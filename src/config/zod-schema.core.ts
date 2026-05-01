@@ -75,10 +75,27 @@ const ExecSecretRefSchema = z
   })
   .strict();
 
+// `id` is plugin-defined: the plugin uses it as a key into its alias-scoped
+// resource catalog. Core only enforces a non-empty length and a generous max
+// to keep wire payloads bounded.
+const PluginSecretRefSchema = z
+  .object({
+    source: z.literal("plugin"),
+    provider: z
+      .string()
+      .regex(
+        SECRET_PROVIDER_ALIAS_PATTERN,
+        'Secret reference provider must match /^[a-z][a-z0-9_-]{0,63}$/ (example: "keycard").',
+      ),
+    id: z.string().min(1).max(256),
+  })
+  .strict();
+
 export const SecretRefSchema = z.discriminatedUnion("source", [
   EnvSecretRefSchema,
   FileSecretRefSchema,
   ExecSecretRefSchema,
+  PluginSecretRefSchema,
 ]);
 
 export const SecretInputSchema = z.union([z.string(), SecretRefSchema]);
@@ -143,10 +160,29 @@ const SecretsExecProviderSchema = z
   })
   .strict();
 
+// Open envelope for plugin-resolved secret providers. Core only validates the
+// `source`/`plugin` discriminator and the alias name pattern; the named
+// plugin's `SecretSourceFactory.configSchema` validates the rest of the
+// payload at config-validation time.
+const SecretsPluginProviderSchema = z
+  .object({
+    source: z.literal("plugin"),
+    plugin: z
+      .string()
+      .min(1)
+      .max(128)
+      .regex(
+        /^[a-z][a-z0-9-]*$/,
+        'secrets.providers.<alias>.plugin must match /^[a-z][a-z0-9-]*$/ (example: "keycard-identity").',
+      ),
+  })
+  .passthrough();
+
 export const SecretProviderSchema = z.discriminatedUnion("source", [
   SecretsEnvProviderSchema,
   SecretsFileProviderSchema,
   SecretsExecProviderSchema,
+  SecretsPluginProviderSchema,
 ]);
 
 export const SecretsConfigSchema = z

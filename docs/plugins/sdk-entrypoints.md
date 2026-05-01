@@ -257,6 +257,55 @@ For CLI registrars specifically:
   rendering help
 - use `commands` alone only for eager compatibility paths
 
+## `openclaw/plugin-sdk/secret-source`
+
+For plugins that contribute a pluggable secret resolver — workload identity,
+KMS, short-lived token brokers, custom issuers. The factory `name` matches what
+operators put in `secrets.providers.<alias>.plugin`; the factory's
+`configSchema` validates the rest of the alias entry. Core dispatches on
+`{ source: "plugin", provider: "<alias>", id: "<key>" }` `SecretRef` values
+and uses the resulting strings in any secret-shaped slot.
+
+```typescript
+import { definePluginEntry } from "openclaw/plugin-sdk/plugin-entry";
+import type { SecretSourceFactory } from "openclaw/plugin-sdk/secret-source";
+import { z } from "zod";
+
+const factory: SecretSourceFactory = {
+  name: "my-issuer",
+  configSchema: z
+    .object({
+      source: z.literal("plugin"),
+      plugin: z.literal("my-issuer"),
+      issuer: z.url(),
+      resources: z.record(z.string(), z.object({ resource: z.url() })),
+    })
+    .strict(),
+  async create(parsed, ctx) {
+    return {
+      name: "my-issuer",
+      alias: ctx.alias,
+      async resolve(refs) {
+        return await Promise.all(refs.map((ref) => fetchToken(parsed, ref.id)));
+      },
+    };
+  },
+};
+
+export default definePluginEntry({
+  id: "my-issuer",
+  name: "My Issuer",
+  description: "Resolves SecretRefs via my-issuer",
+  register(api) {
+    api.registerSecretSource(factory);
+  },
+});
+```
+
+Outcomes returned from `resolve()` may include `expiresAt` (ms since epoch);
+the runtime caches the value and refreshes lazily through the same source when
+a subsequent read falls within the configured leeway of expiry.
+
 ## Plugin shapes
 
 OpenClaw classifies loaded plugins by their registration behavior:

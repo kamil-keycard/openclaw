@@ -1180,6 +1180,7 @@
                   "plugins/bundles",
                   "plugins/codex-harness",
                   "plugins/google-meet",
+                  "plugins/keycard-identity",
                   "plugins/webhooks",
                   "plugins/voice-call",
                   "plugins/memory-wiki",

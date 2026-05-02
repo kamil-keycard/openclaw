@@ -173,6 +173,7 @@ Define providers under `secrets.providers`:
     - Core only validates the envelope (`source: "plugin"`, `plugin: "<factory-name>"`); the plugin's Zod schema validates the rest of the alias entry.
     - Plugin sources may return a per-value `expiresAt`. The runtime caches the value and refreshes lazily through the same source on next access if the cached value is within the TTL leeway of expiry (default 60s).
     - Aliases referencing an unregistered plugin emit a warn diagnostic and skip binding; references resolve as a tagged provider error at request time.
+    - The bundled [Keycard Identity plugin](/plugins/keycard-identity) is the first concrete plugin secret source; see its page for zone configuration and identity methods.
 
     Example (operator config):
 

@@ -1,0 +1,6 @@
+{
+  "id": "keycard-identity",
+  "enabledByDefault": false,
+  "name": "Keycard Identity",
+  "description": "Resolve SecretRefs via Keycard zones using workload-identity federation, client credentials, or private-key JWT."
+}

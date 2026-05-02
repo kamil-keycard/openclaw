@@ -81,7 +81,11 @@ Two layers of config:
         "api": "anthropic-messages",
         "auth": "api-key",
         "apiKey": { "source": "plugin", "provider": "keycard", "id": "anthropic-api-key" },
-        "models": [{ "id": "claude-sonnet-4-6" }]
+        "models": [
+          { "id": "claude-sonnet-4-6", "name": "Claude Sonnet 4.6" },
+          { "id": "claude-opus-4-6", "name": "Claude Opus 4.6" },
+          { "id": "claude-opus-4-7", "name": "Claude Opus 4.7" }
+        ]
       }
     }
   },

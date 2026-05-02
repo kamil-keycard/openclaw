@@ -2,5 +2,80 @@
   "id": "keycard-identity",
   "enabledByDefault": false,
   "name": "Keycard Identity",
-  "description": "Resolve SecretRefs via Keycard zones using workload-identity federation, client credentials, or private-key JWT."
+  "description": "Resolve SecretRefs via Keycard zones using workload-identity federation, client credentials, or private-key JWT.",
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["identity"],
+    "properties": {
+      "identity": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["zoneId", "method"],
+        "properties": {
+          "zoneId": { "type": "string", "minLength": 1 },
+          "issuer": { "type": "string", "format": "uri" },
+          "method": {
+            "oneOf": [
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["kind", "source"],
+                "properties": {
+                  "kind": { "const": "workload-identity" },
+                  "source": {
+                    "type": "object",
+                    "required": ["type"],
+                    "properties": {
+                      "type": {
+                        "enum": ["macos-daemon", "token-file", "spiffe", "static-test"]
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["kind", "clientId", "clientSecret"],
+                "properties": {
+                  "kind": { "const": "client-credentials" },
+                  "clientId": { "type": "string", "minLength": 1 },
+                  "clientSecret": {
+                    "type": "object",
+                    "required": ["source", "provider", "id"],
+                    "properties": {
+                      "source": { "enum": ["env", "file", "exec"] },
+                      "provider": { "type": "string" },
+                      "id": { "type": "string" }
+                    }
+                  }
+                }
+              },
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["kind", "clientId", "keyId", "privateKey"],
+                "properties": {
+                  "kind": { "const": "private-key-jwt" },
+                  "clientId": { "type": "string", "minLength": 1 },
+                  "keyId": { "type": "string", "minLength": 1 },
+                  "privateKey": {
+                    "type": "object",
+                    "required": ["source", "provider", "id"],
+                    "properties": {
+                      "source": { "enum": ["env", "file", "exec"] },
+                      "provider": { "type": "string" },
+                      "id": { "type": "string" }
+                    }
+                  },
+                  "signingAlg": { "enum": ["RS256", "ES256"] }
+                }
+              }
+            ]
+          }
+        }
+      }
+    }
+  }
 }

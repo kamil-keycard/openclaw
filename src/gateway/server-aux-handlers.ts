@@ -10,6 +10,7 @@ import {
   activateSecretsRuntimeSnapshot,
   getActiveSecretsRuntimeSnapshot,
 } from "../secrets/runtime.js";
+import { bootstrapPluginSecretSources } from "../secrets/source-plugin-bootstrap.js";
 import {
   buildGatewayReloadPlan,
   diffConfigPaths,
@@ -104,6 +105,10 @@ export function createGatewayAuxHandlers(params: {
         const stoppedChannels: ChannelKind[] = [];
         const restartedChannels = new Set<ChannelKind>();
         try {
+          await bootstrapPluginSecretSources(previousSnapshot.sourceConfig, {
+            pluginEntryConfig: (name) =>
+              previousSnapshot.sourceConfig.plugins?.entries?.[name]?.config,
+          });
           const prepared = await params.activateRuntimeSecrets(previousSnapshot.sourceConfig, {
             reason: "reload",
             activate: true,

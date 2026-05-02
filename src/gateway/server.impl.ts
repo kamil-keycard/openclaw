@@ -43,6 +43,7 @@ import {
   clearSecretsRuntimeSnapshot,
   getActiveSecretsRuntimeSnapshot,
 } from "../secrets/runtime.js";
+import { bootstrapPluginSecretSources } from "../secrets/source-plugin-bootstrap.js";
 import {
   getInspectableTaskRegistrySummary,
   stopTaskRegistryMaintenance,
@@ -342,6 +343,7 @@ export async function startGatewayServer(
   let startupLastGoodSnapshot = configSnapshot;
   const startupActivationSourceConfig = configSnapshot.sourceConfig;
   const startupRuntimeConfig = applyConfigOverrides(configSnapshot.config);
+  let pluginBootstrap: Awaited<ReturnType<typeof prepareGatewayPluginBootstrap>> | undefined;
   const authBootstrap = await startupTrace.measure("config.auth", () =>
     prepareGatewayStartupConfig({
       configSnapshot,
@@ -349,6 +351,29 @@ export async function startGatewayServer(
       tailscaleOverride: opts.tailscale,
       activateRuntimeSecrets,
       persistStartupAuth: startupConfigLoad.degradedProviderApi !== true,
+      beforeFinalActivate: async (config) => {
+        pluginBootstrap = await startupTrace.measure("plugins.bootstrap", () =>
+          prepareGatewayPluginBootstrap({
+            cfgAtStart: config,
+            activationSourceConfig: startupActivationSourceConfig,
+            startupRuntimeConfig,
+            pluginMetadataSnapshot: startupConfigLoad.pluginMetadataSnapshot,
+            minimalTestGateway,
+            log,
+          }),
+        );
+        const secretBootstrap = await bootstrapPluginSecretSources(config, {
+          pluginEntryConfig: (name) => config.plugins?.entries?.[name]?.config,
+        });
+        for (const diag of secretBootstrap.diagnostics) {
+          if (diag.level === "error") {
+            logSecrets.error?.(`[PLUGIN_SECRET_BOOTSTRAP] ${diag.message}`);
+            emitSecretsStateEvent("SECRETS_RELOADER_DEGRADED", diag.message, config);
+          } else {
+            logSecrets.warn(`[PLUGIN_SECRET_BOOTSTRAP] ${diag.message}`);
+          }
+        }
+      },
     }),
   );
   cfgAtStart = authBootstrap.cfg;
@@ -410,16 +435,9 @@ export async function startGatewayServer(
     startupInternalWriteHash = startupSnapshot.hash ?? null;
     startupLastGoodSnapshot = startupSnapshot;
   }
-  const pluginBootstrap = await startupTrace.measure("plugins.bootstrap", () =>
-    prepareGatewayPluginBootstrap({
-      cfgAtStart,
-      activationSourceConfig: startupActivationSourceConfig,
-      startupRuntimeConfig,
-      pluginMetadataSnapshot: startupConfigLoad.pluginMetadataSnapshot,
-      minimalTestGateway,
-      log,
-    }),
-  );
+  if (!pluginBootstrap) {
+    throw new Error("Plugin bootstrap did not complete; beforeFinalActivate hook was not invoked.");
+  }
   const {
     gatewayPluginConfigAtStart,
     defaultWorkspaceDir,

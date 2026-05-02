@@ -21,6 +21,7 @@ import {
   clearSecretsRuntimeSnapshot,
   getActiveSecretsRuntimeSnapshot,
 } from "../secrets/runtime.js";
+import { bootstrapPluginSecretSources } from "../secrets/source-plugin-bootstrap.js";
 import { getInspectableTaskRegistrySummary } from "../tasks/task-registry.maintenance.js";
 import type { ChannelHealthMonitor } from "./channel-health-monitor.js";
 import { enqueueConfigRecoveryNotice } from "./config-recovery-notice.js";
@@ -425,6 +426,9 @@ export function startManagedGatewayConfigReloader(params: ManagedGatewayConfigRe
     },
     subscribeToWrites: params.subscribeToWrites,
     onHotReload: async (plan, nextConfig) => {
+      await bootstrapPluginSecretSources(nextConfig, {
+        pluginEntryConfig: (name) => nextConfig.plugins?.entries?.[name]?.config,
+      });
       const previousSharedGatewaySessionGeneration =
         params.sharedGatewaySessionGenerationState.current;
       const previousSnapshot = getActiveSecretsRuntimeSnapshot();

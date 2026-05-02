@@ -194,11 +194,8 @@ request time so the rest of the config keeps working.
 
 ## Known gaps (Phase 2)
 
-- Gateway-startup wiring for `bootstrapPluginSecretSources` is not
-  landed yet. Tests drive the bootstrap helper directly today.
 - SPIFFE workload-identity source is declared in the schema but throws
   at acquisition time until the SVID protocol is implemented.
 - SecretRef resolution inside identity methods (`client-credentials`
   `clientSecret`, `private-key-jwt` `privateKey`) needs a resolver
-  injected by the host. The plugin-owned resolver wiring lands alongside
-  the gateway bootstrap call-site.
+  injected by the host.

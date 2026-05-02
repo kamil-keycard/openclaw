@@ -421,6 +421,14 @@ export async function prepareGatewayStartupConfig(params: {
   tailscaleOverride?: GatewayTailscaleConfig;
   activateRuntimeSecrets: ActivateRuntimeSecrets;
   persistStartupAuth?: boolean;
+  /**
+   * Called after auth-token persistence and before the final
+   * `activateRuntimeSecrets(..., { activate: true })` pass.
+   * Use this to load plugin runtimes and run
+   * `bootstrapPluginSecretSources(config)` so plugin-sourced
+   * aliases are bound before secret resolution.
+   */
+  beforeFinalActivate?: (config: OpenClawConfig) => Promise<void>;
 }): Promise<Awaited<ReturnType<typeof ensureGatewayStartupAuth>>> {
   assertValidGatewayStartupConfigSnapshot(params.configSnapshot);
 
@@ -464,6 +472,9 @@ export async function prepareGatewayStartupConfig(params: {
     auth: params.authOverride,
     tailscale: params.tailscaleOverride,
   });
+  if (params.beforeFinalActivate) {
+    await params.beforeFinalActivate(runtimeStartupConfig);
+  }
   const activatedConfig = (
     await params.activateRuntimeSecrets(runtimeStartupConfig, {
       reason: "startup",

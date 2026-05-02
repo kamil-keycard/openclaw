@@ -10,10 +10,10 @@
  *      identity method (cached while still fresh).
  *   3. RFC 8414 discovery of the token endpoint (cached for the life of
  *      the source instance).
- *   4. RFC 8693 token exchange with the assertion + resource / audience /
- *      scope parameters. Responses are cached per resource id with their
- *      reported `expires_in` and coalesced via single-flight so a concurrent
- *      burst hits the issuer once.
+ *   4. Client credentials grant (RFC 6749 §4.4) with a JWT-bearer client
+ *      assertion (RFC 7523) and RFC 8707 resource indicator. Responses are
+ *      cached per resource id with their reported `expires_in` and coalesced
+ *      via single-flight so a concurrent burst hits the issuer once.
  */
 
 import type { PluginLogger } from "openclaw/plugin-sdk/plugin-entry";
@@ -272,7 +272,6 @@ export class KeycardSecretSource implements SecretSource {
           tokenEndpoint: metadata.token_endpoint,
           assertion,
           resource: resource.resource,
-          ...(resource.audience ? { audience: resource.audience } : {}),
           ...(resource.scopes ? { scopes: [...resource.scopes] } : {}),
           now: this.#now,
         },

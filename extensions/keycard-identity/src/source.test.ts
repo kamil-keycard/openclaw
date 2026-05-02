@@ -280,7 +280,7 @@ describe("KeycardSecretSource.resolve", () => {
     }
   });
 
-  it("includes the resource, audience, and scopes in the exchange request", async () => {
+  it("includes the resource and scopes in the exchange request", async () => {
     const spy = makeFetchSpy(async (url) => {
       if (url.endsWith("/.well-known/oauth-authorization-server")) {
         return jsonResponse(DEFAULT_DISCOVERY_BODY);
@@ -312,8 +312,9 @@ describe("KeycardSecretSource.resolve", () => {
     const tokenCall = spy.calls.find((c) => c.url.endsWith("/oauth/token"));
     expect(tokenCall).toBeDefined();
     const params = new URLSearchParams(tokenCall!.init.body as string);
+    expect(params.get("grant_type")).toBe("client_credentials");
     expect(params.get("resource")).toBe("https://api.anthropic.com");
-    expect(params.get("audience")).toBe("aud-anthropic");
+    expect(params.get("audience")).toBeNull();
     expect(params.get("scope")).toBe("inference:write traces:read");
   });
 });

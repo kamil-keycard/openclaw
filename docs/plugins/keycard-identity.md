@@ -18,8 +18,9 @@ At request time the plugin:
 1. Acquires an identity assertion for the gateway (workload-identity
    daemon, token file, client credentials, or private-key JWT).
 2. Performs RFC 8414 discovery against the configured Keycard zone.
-3. Exchanges the assertion for a resource-scoped access token via
-   RFC 8693 token exchange (including RFC 8707 resource indicators).
+3. Exchanges the assertion for a resource-scoped access token via a
+   client credentials grant (RFC 6749 §4.4) with a JWT-bearer client
+   assertion (RFC 7523) and an RFC 8707 resource indicator.
 4. Caches the resulting token per `(alias, id)` with its reported
    `expires_in`, refreshing lazily when within the TTL leeway.
 
@@ -168,7 +169,7 @@ from the operator's `id` key to exchange parameters:
 ```
 
 - `resource` — required. RFC 8707 resource URI on the exchange request.
-- `audience` — optional RFC 8693 audience override.
+- `audience` — optional audience hint (reserved for future delegation flows).
 - `scopes` — optional OAuth scope list joined into the `scope` parameter.
 
 `SecretRef.id` in any downstream field looks up this catalog by key.

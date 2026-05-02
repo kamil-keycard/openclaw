@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
+  CLIENT_CREDENTIALS_GRANT_TYPE,
   discoverAuthorizationServer,
   JWT_BEARER_CLIENT_ASSERTION_TYPE,
   performTokenExchange,
   TokenExchangeError,
-  TOKEN_EXCHANGE_GRANT_TYPE,
 } from "./exchange.js";
 
 function jsonResponse(body: unknown, init: ResponseInit = {}): Response {
@@ -65,7 +65,7 @@ describe("discoverAuthorizationServer", () => {
 });
 
 describe("performTokenExchange", () => {
-  it("sends grant_type=token-exchange with jwt-bearer client assertion", async () => {
+  it("sends grant_type=client_credentials with jwt-bearer client assertion", async () => {
     let captured: { body: string; headers: Record<string, string> } | undefined;
     const fetchImpl = async (_url: string, init: RequestInit) => {
       captured = {
@@ -84,7 +84,6 @@ describe("performTokenExchange", () => {
         tokenEndpoint: "https://zone.keycard.cloud/oauth/token",
         assertion: { kind: "jwt-bearer", token: "eyAssertion" },
         resource: "https://api.openai.com",
-        audience: "https://api.openai.com",
         scopes: ["inference:write"],
         now: () => 2_000_000,
       },
@@ -92,13 +91,15 @@ describe("performTokenExchange", () => {
     );
 
     const params = new URLSearchParams(captured!.body);
-    expect(params.get("grant_type")).toBe(TOKEN_EXCHANGE_GRANT_TYPE);
+    expect(params.get("grant_type")).toBe(CLIENT_CREDENTIALS_GRANT_TYPE);
     expect(params.get("resource")).toBe("https://api.openai.com");
-    expect(params.get("audience")).toBe("https://api.openai.com");
     expect(params.get("scope")).toBe("inference:write");
     expect(params.get("client_assertion")).toBe("eyAssertion");
     expect(params.get("client_assertion_type")).toBe(JWT_BEARER_CLIENT_ASSERTION_TYPE);
-    expect(params.get("subject_token")).toBe("eyAssertion");
+    expect(params.get("subject_token")).toBeNull();
+    expect(params.get("subject_token_type")).toBeNull();
+    expect(params.get("audience")).toBeNull();
+    expect(params.get("requested_token_type")).toBeNull();
 
     expect(response.accessToken).toBe("sk-openai-xyz");
     expect(response.expiresIn).toBe(3600);
@@ -131,7 +132,9 @@ describe("performTokenExchange", () => {
       `Basic ${Buffer.from("svc_gateway:s3cret").toString("base64")}`,
     );
     const params = new URLSearchParams(captured!.body);
+    expect(params.get("grant_type")).toBe(CLIENT_CREDENTIALS_GRANT_TYPE);
     expect(params.has("client_assertion")).toBe(false);
+    expect(params.get("subject_token")).toBeNull();
   });
 
   it("throws a TokenExchangeError for OAuth error responses", async () => {

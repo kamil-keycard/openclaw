@@ -1,9 +1,14 @@
 /**
- * Keycard token exchange client.
+ * Keycard credential exchange client.
  *
- * Implements the minimum RFC 8414 (OAuth authorization server metadata) and
- * RFC 8693 (OAuth 2.0 token exchange, including RFC 8707 resource indicator
- * and RFC 7523 JWT-bearer client assertion) surface area the plugin needs.
+ * Implements the minimum RFC 8414 (OAuth authorization server metadata),
+ * RFC 6749 §4.4 (client credentials grant), RFC 7523 (JWT-bearer client
+ * assertion), and RFC 8707 (resource indicator) surface area the plugin needs.
+ *
+ * The gateway acts on its own behalf — it authenticates to the Keycard zone
+ * with a client assertion and requests resource-scoped access tokens. There
+ * is no subject token; the "acting party" and "authenticated party" are the
+ * same entity.
  *
  * Kept self-contained instead of depending on `@keycardai/oauth` so the
  * plugin has zero runtime deps outside its own package and so tests can
@@ -14,9 +19,7 @@ import type { ClientAssertion } from "./identity.js";
 
 export const JWT_BEARER_CLIENT_ASSERTION_TYPE =
   "urn:ietf:params:oauth:client-assertion-type:jwt-bearer";
-export const TOKEN_EXCHANGE_GRANT_TYPE = "urn:ietf:params:oauth:grant-type:token-exchange";
-export const ACCESS_TOKEN_TYPE = "urn:ietf:params:oauth:token-type:access_token";
-export const JWT_TOKEN_TYPE = "urn:ietf:params:oauth:token-type:jwt";
+export const CLIENT_CREDENTIALS_GRANT_TYPE = "client_credentials";
 
 export type TokenExchangeFetch = (url: string, init: RequestInit) => Promise<Response>;
 
@@ -73,15 +76,11 @@ export type TokenExchangeResponse = {
 
 export type TokenExchangeRequest = {
   tokenEndpoint: string;
-  /** Subject-token carries the gateway's workload-identity assertion, when present. */
-  subjectToken?: string;
-  subjectTokenType?: string;
   /** Client assertion (RFC 7523) or HTTP Basic client credentials. */
   assertion: ClientAssertion;
+  /** RFC 8707 resource indicator — the upstream API the token grants access to. */
   resource?: string;
-  audience?: string;
   scopes?: string[];
-  requestedTokenType?: string;
   now?: () => number;
 };
 
@@ -91,18 +90,10 @@ export async function performTokenExchange(
   options: { signal?: AbortSignal } = {},
 ): Promise<TokenExchangeResponse> {
   const params = new URLSearchParams();
-  params.set("grant_type", TOKEN_EXCHANGE_GRANT_TYPE);
-  params.set("requested_token_type", request.requestedTokenType ?? ACCESS_TOKEN_TYPE);
+  params.set("grant_type", CLIENT_CREDENTIALS_GRANT_TYPE);
 
-  if (request.subjectToken) {
-    params.set("subject_token", request.subjectToken);
-    params.set("subject_token_type", request.subjectTokenType ?? JWT_TOKEN_TYPE);
-  }
   if (request.resource) {
     params.set("resource", request.resource);
-  }
-  if (request.audience) {
-    params.set("audience", request.audience);
   }
   if (request.scopes && request.scopes.length > 0) {
     params.set("scope", request.scopes.join(" "));
@@ -115,13 +106,6 @@ export async function performTokenExchange(
   if (request.assertion.kind === "jwt-bearer") {
     params.set("client_assertion_type", JWT_BEARER_CLIENT_ASSERTION_TYPE);
     params.set("client_assertion", request.assertion.token);
-    // When the subject and client assertion is the same JWT (workload identity)
-    // we default the subject token to the assertion so the server can distinguish
-    // the "acting party" from the "authenticated party" via resource indicator.
-    if (!params.has("subject_token")) {
-      params.set("subject_token", request.assertion.token);
-      params.set("subject_token_type", JWT_TOKEN_TYPE);
-    }
   } else if (request.assertion.kind === "client-basic") {
     const encoded = Buffer.from(
       `${encodeFormComponent(request.assertion.clientId)}:${encodeFormComponent(request.assertion.clientSecret)}`,

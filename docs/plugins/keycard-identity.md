@@ -43,51 +43,53 @@ Two layers of config:
    `source: "plugin"` / `plugin: "keycard-identity"` exposes a resource
    catalog backed by that identity.
 
-```json5
+```json
 {
-  plugins: {
-    entries: {
+  "plugins": {
+    "entries": {
       "keycard-identity": {
-        enabled: true,
-        config: {
-          identity: {
-            zoneId: "zone_abc123",
-            method: {
-              kind: "workload-identity",
-              source: { type: "macos-daemon" },
-            },
-          },
-        },
-      },
-    },
+        "enabled": true,
+        "config": {
+          "identity": {
+            "zoneId": "zone_abc123",
+            "method": {
+              "kind": "workload-identity",
+              "source": { "type": "macos-daemon" }
+            }
+          }
+        }
+      }
+    }
   },
-  secrets: {
-    providers: {
-      keycard: {
-        source: "plugin",
-        plugin: "keycard-identity",
-        resources: {
-          "openai-api-key": { resource: "https://api.openai.com" },
-          "anthropic-api-key": { resource: "https://api.anthropic.com" },
-          "telegram-bot": { resource: "https://api.telegram.org" },
-        },
-      },
-    },
+  "secrets": {
+    "providers": {
+      "keycard": {
+        "source": "plugin",
+        "plugin": "keycard-identity",
+        "resources": {
+          "anthropic-api-key": { "resource": "https://api.anthropic.com" },
+          "openai-api-key": { "resource": "https://api.openai.com" },
+          "telegram-bot": { "resource": "https://api.telegram.org" }
+        }
+      }
+    }
   },
-  models: {
-    providers: {
-      openai: {
-        baseUrl: "https://api.openai.com",
-        auth: "api-key",
-        apiKey: { source: "plugin", provider: "keycard", id: "openai-api-key" },
-      },
-    },
+  "models": {
+    "providers": {
+      "anthropic": {
+        "baseUrl": "https://api.anthropic.com",
+        "api": "anthropic-messages",
+        "auth": "api-key",
+        "apiKey": { "source": "plugin", "provider": "keycard", "id": "anthropic-api-key" },
+        "models": [{ "id": "claude-sonnet-4-6" }]
+      }
+    }
   },
-  channels: {
-    telegram: {
-      botToken: { source: "plugin", provider: "keycard", id: "telegram-bot" },
-    },
-  },
+  "channels": {
+    "telegram": {
+      "botToken": { "source": "plugin", "provider": "keycard", "id": "telegram-bot" }
+    }
+  }
 }
 ```
 
@@ -98,10 +100,10 @@ touching any other config.
 
 ### Workload identity
 
-```json5
+```json
 {
-  kind: "workload-identity",
-  source: { type: "macos-daemon", socketPath: "/var/run/keycard-osx-oidcd.sock" },
+  "kind": "workload-identity",
+  "source": { "type": "macos-daemon", "socketPath": "/var/run/keycard-osx-oidcd.sock" }
 }
 ```
 
@@ -117,11 +119,11 @@ Sources (`source.type`):
 
 ### Client credentials
 
-```json5
+```json
 {
-  kind: "client-credentials",
-  clientId: "svc_gateway",
-  clientSecret: { source: "env", provider: "default", id: "KEYCARD_GATEWAY_SECRET" },
+  "kind": "client-credentials",
+  "clientId": "svc_gateway",
+  "clientSecret": { "source": "env", "provider": "default", "id": "KEYCARD_GATEWAY_SECRET" }
 }
 ```
 
@@ -131,13 +133,13 @@ auth on the token endpoint.
 
 ### Private-key JWT (RFC 7523)
 
-```json5
+```json
 {
-  kind: "private-key-jwt",
-  clientId: "svc_gateway",
-  keyId: "k1",
-  privateKey: { source: "file", provider: "mounted", id: "/keys/gateway.pem" },
-  signingAlg: "RS256",
+  "kind": "private-key-jwt",
+  "clientId": "svc_gateway",
+  "keyId": "k1",
+  "privateKey": { "source": "file", "provider": "mounted", "id": "/keys/gateway.pem" },
+  "signingAlg": "RS256"
 }
 ```
 
@@ -149,15 +151,15 @@ algorithms: `RS256` (default), `ES256`.
 Each alias under `secrets.providers.<alias>` carries a `resources` map
 from the operator's `id` key to exchange parameters:
 
-```json5
+```json
 {
-  resources: {
-    "openai-api-key": {
-      resource: "https://api.openai.com",
-      audience: "https://api.openai.com",
-      scopes: ["inference:write"],
-    },
-  },
+  "resources": {
+    "anthropic-api-key": {
+      "resource": "https://api.anthropic.com",
+      "audience": "https://api.anthropic.com",
+      "scopes": ["inference:write"]
+    }
+  }
 }
 ```
 

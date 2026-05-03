@@ -75,7 +75,10 @@ export type KeycardSourceFactoryOptions = {
 
 type CachedTokenEntry = {
   value: string;
-  expiresAt?: number;
+  /** Server-reported absolute expiry — returned to core in `SecretSourceOutcome`. */
+  wireExpiresAt?: number;
+  /** Effective absolute expiry used for staleness checks (may be config-overridden). */
+  cacheExpiresAt?: number;
   resolvedAt: number;
 };
 
@@ -103,6 +106,7 @@ export function createKeycardSecretSourceFactory(
         alias,
         identityConfig,
         resources: parsedAlias.resources,
+        defaultCacheTtlSec: parsedAlias.defaultCacheTtlSec,
         logger: options.logger,
         fetchImpl: options.fetchImpl,
         identityEnv: options.identityEnv,
@@ -171,6 +175,8 @@ type KeycardSecretSourceOptions = {
   alias: string;
   identityConfig: ResolvedIdentityConfig;
   resources: Record<string, KeycardResourceEntry>;
+  /** Alias-level default cache TTL (seconds). Per-resource `cacheTtlSec` wins. */
+  defaultCacheTtlSec?: number;
   logger?: PluginLogger;
   fetchImpl?: TokenExchangeFetch;
   identityEnv?: IdentityAcquisitionEnv;
@@ -185,6 +191,7 @@ export class KeycardSecretSource implements SecretSource {
 
   readonly #identityConfig: ResolvedIdentityConfig;
   readonly #resources: Record<string, KeycardResourceEntry>;
+  readonly #defaultCacheTtlSec?: number;
   readonly #logger?: PluginLogger;
   readonly #fetchImpl: TokenExchangeFetch;
   readonly #identityEnv: IdentityAcquisitionEnv;
@@ -202,6 +209,7 @@ export class KeycardSecretSource implements SecretSource {
     this.alias = opts.alias;
     this.#identityConfig = opts.identityConfig;
     this.#resources = opts.resources;
+    this.#defaultCacheTtlSec = opts.defaultCacheTtlSec;
     if (opts.logger) {
       this.#logger = opts.logger;
     }
@@ -239,11 +247,11 @@ export class KeycardSecretSource implements SecretSource {
     }
 
     const cached = this.#tokenCache.get(id);
-    if (cached && !this.#isStale(cached.expiresAt)) {
+    if (cached && !this.#isTokenStale(cached)) {
       return {
         ok: true,
         value: cached.value,
-        ...(cached.expiresAt ? { expiresAt: cached.expiresAt } : {}),
+        ...(cached.wireExpiresAt ? { expiresAt: cached.wireExpiresAt } : {}),
       };
     }
 
@@ -277,18 +285,22 @@ export class KeycardSecretSource implements SecretSource {
         },
         this.#fetchImpl,
       );
+      const now = this.#now();
+      const configTtlSec = resource.cacheTtlSec ?? this.#defaultCacheTtlSec;
       const entry: CachedTokenEntry = {
         value: response.accessToken,
-        resolvedAt: this.#now(),
+        resolvedAt: now,
       };
       if (typeof response.expiresAt === "number") {
-        entry.expiresAt = response.expiresAt;
+        entry.wireExpiresAt = response.expiresAt;
       }
+      entry.cacheExpiresAt =
+        typeof configTtlSec === "number" ? now + configTtlSec * 1_000 : entry.wireExpiresAt;
       this.#tokenCache.set(id, entry);
       return {
         ok: true,
         value: entry.value,
-        ...(entry.expiresAt ? { expiresAt: entry.expiresAt } : {}),
+        ...(entry.wireExpiresAt ? { expiresAt: entry.wireExpiresAt } : {}),
       };
     } catch (err) {
       const reason = classifyReason(err);
@@ -343,11 +355,13 @@ export class KeycardSecretSource implements SecretSource {
     }
   }
 
-  #isStale(expiresAt?: number): boolean {
-    if (typeof expiresAt !== "number") {
+  #isTokenStale(cached: CachedTokenEntry): boolean {
+    if (typeof cached.cacheExpiresAt !== "number") {
       return false;
     }
-    return this.#now() >= expiresAt - this.#tokenRefreshSkewMs;
+    const ttlMs = cached.cacheExpiresAt - cached.resolvedAt;
+    const skew = Math.min(this.#tokenRefreshSkewMs, Math.max(1_000, Math.floor(ttlMs / 3)));
+    return this.#now() >= cached.cacheExpiresAt - skew;
   }
 
   #isAssertionStale(expiresAt?: number): boolean {

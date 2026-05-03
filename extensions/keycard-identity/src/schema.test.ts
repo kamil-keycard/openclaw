@@ -127,6 +127,61 @@ describe("KeycardAliasConfigSchema", () => {
     expect(result.success).toBe(false);
   });
 
+  it("accepts per-resource cacheTtlSec", () => {
+    const parsed = KeycardAliasConfigSchema.parse({
+      source: "plugin",
+      plugin: "keycard-identity",
+      resources: {
+        "openai-api-key": { resource: "https://api.openai.com", cacheTtlSec: 600 },
+      },
+    });
+    expect(parsed.resources["openai-api-key"].cacheTtlSec).toBe(600);
+  });
+
+  it("accepts alias-level defaultCacheTtlSec", () => {
+    const parsed = KeycardAliasConfigSchema.parse({
+      source: "plugin",
+      plugin: "keycard-identity",
+      defaultCacheTtlSec: 300,
+      resources: {
+        "openai-api-key": { resource: "https://api.openai.com" },
+      },
+    });
+    expect(parsed.defaultCacheTtlSec).toBe(300);
+  });
+
+  it("rejects non-positive cacheTtlSec", () => {
+    const result = KeycardAliasConfigSchema.safeParse({
+      source: "plugin",
+      plugin: "keycard-identity",
+      resources: {
+        bad: { resource: "https://api.openai.com", cacheTtlSec: 0 },
+      },
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it("rejects cacheTtlSec exceeding 86400", () => {
+    const result = KeycardAliasConfigSchema.safeParse({
+      source: "plugin",
+      plugin: "keycard-identity",
+      resources: {
+        bad: { resource: "https://api.openai.com", cacheTtlSec: 86_401 },
+      },
+    });
+    expect(result.success).toBe(false);
+  });
+
+  it("rejects non-positive defaultCacheTtlSec", () => {
+    const result = KeycardAliasConfigSchema.safeParse({
+      source: "plugin",
+      plugin: "keycard-identity",
+      defaultCacheTtlSec: -1,
+      resources: {},
+    });
+    expect(result.success).toBe(false);
+  });
+
   it("allows an alias-level identity override", () => {
     const parsed = KeycardAliasConfigSchema.parse({
       source: "plugin",

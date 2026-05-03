@@ -280,6 +280,220 @@ describe("KeycardSecretSource.resolve", () => {
     }
   });
 
+  it("uses per-resource cacheTtlSec to override short server expires_in", async () => {
+    let tokenCalls = 0;
+    const spy = makeFetchSpy(async (url) => {
+      if (url.endsWith("/.well-known/oauth-authorization-server")) {
+        return jsonResponse(DEFAULT_DISCOVERY_BODY);
+      }
+      tokenCalls += 1;
+      return jsonResponse({
+        access_token: `sk-${tokenCalls}`,
+        token_type: "Bearer",
+        expires_in: 30,
+      });
+    });
+    let now = 1_000;
+    const factory = createKeycardSecretSourceFactory({
+      pluginConfig: makePluginConfig(),
+      fetchImpl: spy.fetch,
+      now: () => now,
+      tokenRefreshSkewMs: 60_000,
+    });
+    const parsed = factory.configSchema.parse(
+      makeAliasConfig({
+        resources: {
+          "openai-api-key": {
+            resource: "https://api.openai.com",
+            cacheTtlSec: 600,
+          },
+        },
+      }),
+    );
+    const source = await factory.create(parsed, { alias: "keycard" });
+
+    const first = await source.resolve([{ id: "openai-api-key" }]);
+    expect(first[0]).toMatchObject({ ok: true, value: "sk-1" });
+    expect(tokenCalls).toBe(1);
+
+    // 5 minutes later — would be long-expired with server's 30s but fresh with 600s cache TTL.
+    now = 1_000 + 300_000;
+    const second = await source.resolve([{ id: "openai-api-key" }]);
+    expect(second[0]).toMatchObject({ ok: true, value: "sk-1" });
+    expect(tokenCalls).toBe(1);
+
+    // Past the adaptive skew window for 600s TTL → stale.
+    // skew = min(60_000, max(1_000, floor(600_000/3))) = 60_000
+    // stale at: 1_000 + 600_000 - 60_000 = 541_000
+    now = 541_001;
+    const third = await source.resolve([{ id: "openai-api-key" }]);
+    expect(third[0]).toMatchObject({ ok: true, value: "sk-2" });
+    expect(tokenCalls).toBe(2);
+  });
+
+  it("alias defaultCacheTtlSec applies when resource has no cacheTtlSec", async () => {
+    let tokenCalls = 0;
+    const spy = makeFetchSpy(async (url) => {
+      if (url.endsWith("/.well-known/oauth-authorization-server")) {
+        return jsonResponse(DEFAULT_DISCOVERY_BODY);
+      }
+      tokenCalls += 1;
+      return jsonResponse({
+        access_token: `sk-${tokenCalls}`,
+        token_type: "Bearer",
+        expires_in: 10,
+      });
+    });
+    let now = 0;
+    const factory = createKeycardSecretSourceFactory({
+      pluginConfig: makePluginConfig(),
+      fetchImpl: spy.fetch,
+      now: () => now,
+      tokenRefreshSkewMs: 60_000,
+    });
+    const parsed = factory.configSchema.parse(
+      makeAliasConfig({
+        defaultCacheTtlSec: 300,
+        resources: {
+          "openai-api-key": { resource: "https://api.openai.com" },
+        },
+      }),
+    );
+    const source = await factory.create(parsed, { alias: "keycard" });
+
+    await source.resolve([{ id: "openai-api-key" }]);
+    expect(tokenCalls).toBe(1);
+
+    // 2 minutes later — server's 10s expired but alias default 300s keeps it fresh.
+    now = 120_000;
+    await source.resolve([{ id: "openai-api-key" }]);
+    expect(tokenCalls).toBe(1);
+  });
+
+  it("per-resource cacheTtlSec wins over alias defaultCacheTtlSec", async () => {
+    let tokenCalls = 0;
+    const spy = makeFetchSpy(async (url) => {
+      if (url.endsWith("/.well-known/oauth-authorization-server")) {
+        return jsonResponse(DEFAULT_DISCOVERY_BODY);
+      }
+      tokenCalls += 1;
+      return jsonResponse({
+        access_token: `sk-${tokenCalls}`,
+        token_type: "Bearer",
+        expires_in: 10,
+      });
+    });
+    let now = 0;
+    const factory = createKeycardSecretSourceFactory({
+      pluginConfig: makePluginConfig(),
+      fetchImpl: spy.fetch,
+      now: () => now,
+      tokenRefreshSkewMs: 60_000,
+    });
+    const parsed = factory.configSchema.parse(
+      makeAliasConfig({
+        defaultCacheTtlSec: 3600,
+        resources: {
+          "openai-api-key": {
+            resource: "https://api.openai.com",
+            cacheTtlSec: 120,
+          },
+        },
+      }),
+    );
+    const source = await factory.create(parsed, { alias: "keycard" });
+
+    await source.resolve([{ id: "openai-api-key" }]);
+    expect(tokenCalls).toBe(1);
+
+    // Past the 120s resource TTL's adaptive skew window.
+    // skew = min(60_000, max(1_000, floor(120_000/3))) = 40_000
+    // stale at 120_000 - 40_000 = 80_000
+    now = 80_001;
+    await source.resolve([{ id: "openai-api-key" }]);
+    expect(tokenCalls).toBe(2);
+  });
+
+  it("adaptive skew shrinks for short TTLs so the cache stays usable", async () => {
+    let tokenCalls = 0;
+    const spy = makeFetchSpy(async (url) => {
+      if (url.endsWith("/.well-known/oauth-authorization-server")) {
+        return jsonResponse(DEFAULT_DISCOVERY_BODY);
+      }
+      tokenCalls += 1;
+      return jsonResponse({
+        access_token: `sk-${tokenCalls}`,
+        token_type: "Bearer",
+        expires_in: 90,
+      });
+    });
+    let now = 0;
+    const factory = createKeycardSecretSourceFactory({
+      pluginConfig: makePluginConfig(),
+      fetchImpl: spy.fetch,
+      now: () => now,
+      tokenRefreshSkewMs: 60_000,
+    });
+    const parsed = factory.configSchema.parse(
+      makeAliasConfig({
+        resources: {
+          "openai-api-key": { resource: "https://api.openai.com" },
+        },
+      }),
+    );
+    const source = await factory.create(parsed, { alias: "keycard" });
+
+    await source.resolve([{ id: "openai-api-key" }]);
+    expect(tokenCalls).toBe(1);
+
+    // 90s TTL → adaptive skew = min(60_000, max(1_000, floor(90_000/3))) = 30_000
+    // Still fresh at 59s (before 90_000 - 30_000 = 60_000).
+    now = 59_000;
+    await source.resolve([{ id: "openai-api-key" }]);
+    expect(tokenCalls).toBe(1);
+
+    // Stale at 60_001.
+    now = 60_001;
+    await source.resolve([{ id: "openai-api-key" }]);
+    expect(tokenCalls).toBe(2);
+  });
+
+  it("returns wire expiresAt to core even when cacheTtlSec overrides staleness", async () => {
+    const spy = makeFetchSpy(async (url) => {
+      if (url.endsWith("/.well-known/oauth-authorization-server")) {
+        return jsonResponse(DEFAULT_DISCOVERY_BODY);
+      }
+      return jsonResponse({
+        access_token: "sk-wire",
+        token_type: "Bearer",
+        expires_in: 30,
+      });
+    });
+    const factory = createKeycardSecretSourceFactory({
+      pluginConfig: makePluginConfig(),
+      fetchImpl: spy.fetch,
+      now: () => 10_000,
+    });
+    const parsed = factory.configSchema.parse(
+      makeAliasConfig({
+        resources: {
+          "openai-api-key": {
+            resource: "https://api.openai.com",
+            cacheTtlSec: 600,
+          },
+        },
+      }),
+    );
+    const source = await factory.create(parsed, { alias: "keycard" });
+    const outcomes = await source.resolve([{ id: "openai-api-key" }]);
+
+    expect(outcomes[0]).toMatchObject({
+      ok: true,
+      value: "sk-wire",
+      expiresAt: 10_000 + 30_000,
+    });
+  });
+
   it("includes the resource and scopes in the exchange request", async () => {
     const spy = makeFetchSpy(async (url) => {
       if (url.endsWith("/.well-known/oauth-authorization-server")) {

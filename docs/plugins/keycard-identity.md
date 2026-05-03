@@ -178,12 +178,61 @@ from the operator's `id` key to exchange parameters:
 
 Tokens returned by the exchange carry `expires_in`. The plugin caches
 each token with its absolute `expiresAt` and refreshes lazily when within
-the `tokenRefreshSkewMs` window of expiry (default 60 s). Concurrent
-resolves for the same id coalesce through single-flight so a burst hits
-the zone once.
+a refresh-skew window of expiry. Concurrent resolves for the same id
+coalesce through single-flight so a burst hits the zone once.
 
 Identity assertions (workload-identity JWTs) are cached similarly when
 their reported `expiresAt` is present.
+
+### Cache TTL override
+
+When the Keycard zone returns a short `expires_in` (e.g. 30 s), the
+default refresh skew can consume the entire TTL and cause a token
+exchange on every resolve. Two config knobs let operators override how
+long cached tokens are considered fresh:
+
+- **`defaultCacheTtlSec`** (alias-level) — default cache lifetime
+  (seconds) for all resources under this alias.
+- **`cacheTtlSec`** (per resource) — cache lifetime for this resource.
+
+Precedence: resource `cacheTtlSec` > alias `defaultCacheTtlSec` >
+server `expires_in`. When neither is set, the server-reported value
+applies.
+
+```json
+{
+  "secrets": {
+    "providers": {
+      "keycard": {
+        "source": "plugin",
+        "plugin": "keycard-identity",
+        "defaultCacheTtlSec": 300,
+        "resources": {
+          "anthropic-api-key": {
+            "resource": "https://api.anthropic.com",
+            "cacheTtlSec": 600
+          },
+          "openai-api-key": {
+            "resource": "https://api.openai.com"
+          }
+        }
+      }
+    }
+  }
+}
+```
+
+In this example, `anthropic-api-key` caches for 600 s (per-resource
+override) and `openai-api-key` caches for 300 s (alias default).
+
+### Adaptive refresh skew
+
+The refresh skew auto-shrinks for short TTLs so the cache stays useful:
+`min(60 s, max(1 s, ttl / 3))`. A 90 s TTL refreshes at 60 s (30 s
+skew), not at 30 s (60 s skew). The floor of 1 s ensures tokens are
+never served past expiry. The `expiresAt` reported to core in the
+`SecretSourceOutcome` always reflects the server-reported value; the
+override only affects the internal staleness check.
 
 ## Diagnostics
 

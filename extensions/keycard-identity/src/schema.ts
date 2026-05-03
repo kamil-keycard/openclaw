@@ -173,6 +173,8 @@ const keycardResourceEntrySchema = z
     audience: z.string().min(1).optional(),
     /** Optional OAuth scopes. */
     scopes: z.array(z.string().min(1)).nonempty().optional(),
+    /** Override how long to cache the exchanged token (seconds). */
+    cacheTtlSec: z.number().int().positive().max(86_400).optional(),
   })
   .strict();
 
@@ -189,6 +191,12 @@ export const KeycardAliasConfigSchema = z
      * here.
      */
     identity: KeycardPluginConfigSchema.shape.identity.optional(),
+    /**
+     * Default cache TTL (seconds) for all resources under this alias.
+     * Per-resource `cacheTtlSec` takes precedence. When neither is set the
+     * server-reported `expires_in` is used.
+     */
+    defaultCacheTtlSec: z.number().int().positive().max(86_400).optional(),
   })
   .strict();
 
